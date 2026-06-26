@@ -99,9 +99,6 @@ struct TiseApp {
 
     // Theme.
     theme_dark: bool,
-
-    // Feature: filter TIHabModuleState objects by controlling faction.
-    hab_module_faction_filter: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -2671,13 +2668,6 @@ fn value_preview(val: &TiValue) -> String {
     }
 }
 
-fn hab_module_faction_id(save: &crate::LoadedSave, module_id: i64) -> Option<i64> {
-    let module_val = save.get_object_value(statics::TI_GROUP_HAB_MODULE_STATE, module_id)?;
-    let sector_id = module_val.get(statics::TI_PROP_SECTOR)?.is_relational_ref()?;
-    let sector_val = save.get_object_value(statics::TI_GROUP_SECTOR_STATE, sector_id)?;
-    sector_val.get(statics::TI_PROP_FACTION)?.is_relational_ref()
-}
-
 fn array_of_relational_refs(val: &TiValue) -> Option<Vec<i64>> {
     let TiValue::Array(items) = val else {
         return None;
@@ -3567,39 +3557,6 @@ impl eframe::App for TiseApp {
                     return;
                 };
 
-                if group == statics::TI_GROUP_HAB_MODULE_STATE {
-                    ui.horizontal(|ui| {
-                        ui.label(statics::EN_LABEL_FILTER_FACTION);
-                        let mut factions: Vec<_> = objects_by_group
-                            .get(statics::TI_GROUP_FACTION_STATE)
-                            .map(|v| v.iter().collect())
-                            .unwrap_or_default();
-                        factions.sort_by_key(|f| f.display_name.to_lowercase());
-                        let selected_label = self
-                            .hab_module_faction_filter
-                            .and_then(|id| id_to_display_name.get(&id))
-                            .map(String::as_str)
-                            .unwrap_or(statics::EN_FILTER_ALL_FACTIONS);
-                        egui::ComboBox::from_id_salt("hab_module_faction_filter")
-                            .selected_text(selected_label)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.hab_module_faction_filter,
-                                    None,
-                                    statics::EN_FILTER_ALL_FACTIONS,
-                                );
-                                for faction in &factions {
-                                    ui.selectable_value(
-                                        &mut self.hab_module_faction_filter,
-                                        Some(faction.id),
-                                        &faction.display_name,
-                                    );
-                                }
-                            });
-                    });
-                    ui.separator();
-                }
-
                 let mut objects: Vec<_> = objects_by_group
                     .get(&group)
                     .map(|v| v.iter().collect())
@@ -3609,14 +3566,6 @@ impl eframe::App for TiseApp {
                     objects.sort_by_key(|o| o.id);
                 } else {
                     objects.sort_by_key(|o| o.display_name.to_lowercase());
-                }
-
-                if group == statics::TI_GROUP_HAB_MODULE_STATE {
-                    if let Some(faction_id) = self.hab_module_faction_filter {
-                        objects.retain(|obj| {
-                            hab_module_faction_id(&save, obj.id) == Some(faction_id)
-                        });
-                    }
                 }
 
                 let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
@@ -3708,51 +3657,9 @@ impl eframe::App for TiseApp {
 #[cfg(test)]
 mod tests {
     use super::TiseApp;
-    use super::{ItemSearchHit, ItemSortKey, hab_module_faction_id};
-    use crate::{LoadedSave, TiValue, value::TiNumber};
-    use crate::statics;
+    use super::{ItemSearchHit, ItemSortKey};
+    use crate::{TiValue, value::TiNumber};
     use indexmap::IndexMap;
-
-    fn make_ref(id: i64) -> TiValue {
-        let mut map = IndexMap::new();
-        map.insert(
-            statics::TI_REF_FIELD_VALUE.to_string(),
-            TiValue::Number(TiNumber::I64(id)),
-        );
-        TiValue::Object(map)
-    }
-
-    fn make_ti_entry(id: i64, props: IndexMap<String, TiValue>) -> TiValue {
-        let mut key_ref = IndexMap::new();
-        key_ref.insert(
-            statics::TI_REF_FIELD_VALUE.to_string(),
-            TiValue::Number(TiNumber::I64(id)),
-        );
-        let mut entry = IndexMap::new();
-        entry.insert(statics::TI_FIELD_KEY_CAP.to_string(), TiValue::Object(key_ref));
-        entry.insert(statics::TI_FIELD_VALUE_CAP.to_string(), TiValue::Object(props));
-        TiValue::Object(entry)
-    }
-
-    fn make_hab_save(
-        module_id: i64,
-        module_props: IndexMap<String, TiValue>,
-        sector_id: i64,
-        sector_props: IndexMap<String, TiValue>,
-    ) -> LoadedSave {
-        let mut gamestates = IndexMap::new();
-        gamestates.insert(
-            statics::TI_GROUP_HAB_MODULE_STATE.to_string(),
-            TiValue::Array(vec![make_ti_entry(module_id, module_props)]),
-        );
-        gamestates.insert(
-            statics::TI_GROUP_SECTOR_STATE.to_string(),
-            TiValue::Array(vec![make_ti_entry(sector_id, sector_props)]),
-        );
-        let mut root = IndexMap::new();
-        root.insert(statics::TI_GAMESTATES.to_string(), TiValue::Object(gamestates));
-        LoadedSave::from_root_for_test(TiValue::Object(root))
-    }
 
     #[test]
     fn is_simple_list_accepts_primitives_only() {
@@ -3807,53 +3714,5 @@ mod tests {
         TiseApp::sort_item_search_hits(&mut hits, ItemSortKey::Id, true);
         assert_eq!(hits[0].object_id, 2);
         assert_eq!(hits[1].object_id, 5);
-    }
-
-    #[test]
-    fn hab_module_faction_id_resolves_full_chain() {
-        let mut module_props = IndexMap::new();
-        module_props.insert(statics::TI_PROP_SECTOR.to_string(), make_ref(200));
-        let mut sector_props = IndexMap::new();
-        sector_props.insert(statics::TI_PROP_FACTION.to_string(), make_ref(300));
-        let save = make_hab_save(100, module_props, 200, sector_props);
-        assert_eq!(hab_module_faction_id(&save, 100), Some(300));
-    }
-
-    #[test]
-    fn hab_module_faction_id_returns_none_for_unknown_module() {
-        let mut module_props = IndexMap::new();
-        module_props.insert(statics::TI_PROP_SECTOR.to_string(), make_ref(200));
-        let mut sector_props = IndexMap::new();
-        sector_props.insert(statics::TI_PROP_FACTION.to_string(), make_ref(300));
-        let save = make_hab_save(100, module_props, 200, sector_props);
-        assert_eq!(hab_module_faction_id(&save, 999), None);
-    }
-
-    #[test]
-    fn hab_module_faction_id_returns_none_when_sector_prop_missing() {
-        let module_props = IndexMap::new(); // no "sector" key
-        let sector_props = IndexMap::new();
-        let save = make_hab_save(100, module_props, 200, sector_props);
-        assert_eq!(hab_module_faction_id(&save, 100), None);
-    }
-
-    #[test]
-    fn hab_module_faction_id_returns_none_when_sector_not_found() {
-        // Module points at sector 999, but only sector 200 exists.
-        let mut module_props = IndexMap::new();
-        module_props.insert(statics::TI_PROP_SECTOR.to_string(), make_ref(999));
-        let mut sector_props = IndexMap::new();
-        sector_props.insert(statics::TI_PROP_FACTION.to_string(), make_ref(300));
-        let save = make_hab_save(100, module_props, 200, sector_props);
-        assert_eq!(hab_module_faction_id(&save, 100), None);
-    }
-
-    #[test]
-    fn hab_module_faction_id_returns_none_when_faction_prop_missing() {
-        let mut module_props = IndexMap::new();
-        module_props.insert(statics::TI_PROP_SECTOR.to_string(), make_ref(200));
-        let sector_props = IndexMap::new(); // no "faction" key
-        let save = make_hab_save(100, module_props, 200, sector_props);
-        assert_eq!(hab_module_faction_id(&save, 100), None);
     }
 }
