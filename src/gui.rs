@@ -102,6 +102,17 @@ struct TiseApp {
 
     // Feature: filter TIHabModuleState objects by controlling faction.
     hab_module_faction_filter: Option<i64>,
+
+    // Feature: filter TIHabModuleState objects by construction completion state.
+    hab_module_construction_filter: HabModuleConstructionFilter,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum HabModuleConstructionFilter {
+    #[default]
+    All,
+    Completed,
+    InProgress,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -2678,6 +2689,14 @@ fn hab_module_faction_id(save: &crate::LoadedSave, module_id: i64) -> Option<i64
     sector_val.get(statics::TI_PROP_FACTION)?.is_relational_ref()
 }
 
+fn hab_module_construction_completed(save: &crate::LoadedSave, module_id: i64) -> Option<bool> {
+    let module_val = save.get_object_value(statics::TI_GROUP_HAB_MODULE_STATE, module_id)?;
+    match module_val.get(statics::TI_PROP_CONSTRUCTION_COMPLETED)? {
+        crate::TiValue::Bool(b) => Some(*b),
+        _ => None,
+    }
+}
+
 fn array_of_relational_refs(val: &TiValue) -> Option<Vec<i64>> {
     let TiValue::Array(items) = val else {
         return None;
@@ -3597,6 +3616,38 @@ impl eframe::App for TiseApp {
                                 }
                             });
                     });
+                    ui.horizontal(|ui| {
+                        ui.label(statics::EN_LABEL_FILTER_CONSTRUCTION);
+                        egui::ComboBox::from_id_salt("hab_module_construction_filter")
+                            .selected_text(match self.hab_module_construction_filter {
+                                HabModuleConstructionFilter::All => {
+                                    statics::EN_FILTER_CONSTRUCTION_ALL
+                                }
+                                HabModuleConstructionFilter::Completed => {
+                                    statics::EN_FILTER_CONSTRUCTION_COMPLETED
+                                }
+                                HabModuleConstructionFilter::InProgress => {
+                                    statics::EN_FILTER_CONSTRUCTION_IN_PROGRESS
+                                }
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.hab_module_construction_filter,
+                                    HabModuleConstructionFilter::All,
+                                    statics::EN_FILTER_CONSTRUCTION_ALL,
+                                );
+                                ui.selectable_value(
+                                    &mut self.hab_module_construction_filter,
+                                    HabModuleConstructionFilter::Completed,
+                                    statics::EN_FILTER_CONSTRUCTION_COMPLETED,
+                                );
+                                ui.selectable_value(
+                                    &mut self.hab_module_construction_filter,
+                                    HabModuleConstructionFilter::InProgress,
+                                    statics::EN_FILTER_CONSTRUCTION_IN_PROGRESS,
+                                );
+                            });
+                    });
                     ui.separator();
                 }
 
@@ -3616,6 +3667,19 @@ impl eframe::App for TiseApp {
                         objects.retain(|obj| {
                             hab_module_faction_id(&save, obj.id) == Some(faction_id)
                         });
+                    }
+                    match self.hab_module_construction_filter {
+                        HabModuleConstructionFilter::All => {}
+                        HabModuleConstructionFilter::Completed => {
+                            objects.retain(|obj| {
+                                hab_module_construction_completed(&save, obj.id) == Some(true)
+                            });
+                        }
+                        HabModuleConstructionFilter::InProgress => {
+                            objects.retain(|obj| {
+                                hab_module_construction_completed(&save, obj.id) != Some(true)
+                            });
+                        }
                     }
                 }
 
@@ -3708,7 +3772,7 @@ impl eframe::App for TiseApp {
 #[cfg(test)]
 mod tests {
     use super::TiseApp;
-    use super::{ItemSearchHit, ItemSortKey, hab_module_faction_id};
+    use super::{ItemSearchHit, ItemSortKey, hab_module_faction_id, hab_module_construction_completed};
     use crate::{LoadedSave, TiValue, value::TiNumber};
     use crate::statics;
     use indexmap::IndexMap;
@@ -3855,5 +3919,54 @@ mod tests {
         let sector_props = IndexMap::new(); // no "faction" key
         let save = make_hab_save(100, module_props, 200, sector_props);
         assert_eq!(hab_module_faction_id(&save, 100), None);
+    }
+
+    fn make_construction_save(module_id: i64, construction_completed: Option<TiValue>) -> crate::LoadedSave {
+        let mut module_props = IndexMap::new();
+        if let Some(val) = construction_completed {
+            module_props.insert(statics::TI_PROP_CONSTRUCTION_COMPLETED.to_string(), val);
+        }
+        // sector is not needed for construction tests; use a dummy sector with no entries
+        let mut gamestates = IndexMap::new();
+        gamestates.insert(
+            statics::TI_GROUP_HAB_MODULE_STATE.to_string(),
+            TiValue::Array(vec![make_ti_entry(module_id, module_props)]),
+        );
+        let mut root = IndexMap::new();
+        root.insert(statics::TI_GAMESTATES.to_string(), TiValue::Object(gamestates));
+        crate::LoadedSave::from_root_for_test(TiValue::Object(root))
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_true_when_complete() {
+        let save = make_construction_save(10, Some(TiValue::Bool(true)));
+        assert_eq!(hab_module_construction_completed(&save, 10), Some(true));
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_false_when_in_progress() {
+        let save = make_construction_save(10, Some(TiValue::Bool(false)));
+        assert_eq!(hab_module_construction_completed(&save, 10), Some(false));
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_none_when_prop_missing() {
+        let save = make_construction_save(10, None);
+        assert_eq!(hab_module_construction_completed(&save, 10), None);
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_none_for_unknown_module() {
+        let save = make_construction_save(10, Some(TiValue::Bool(true)));
+        assert_eq!(hab_module_construction_completed(&save, 999), None);
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_none_when_prop_wrong_type() {
+        let save = make_construction_save(
+            10,
+            Some(TiValue::Number(crate::value::TiNumber::I64(1))),
+        );
+        assert_eq!(hab_module_construction_completed(&save, 10), None);
     }
 }

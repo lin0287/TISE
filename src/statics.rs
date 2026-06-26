@@ -200,6 +200,15 @@ pub const TI_GROUP_FACTION_STATE: &str = "PavonisInteractive.TerraInvicta.TIFact
 pub const TI_PROP_SECTOR: &str = "sector";
 pub const TI_PROP_FACTION: &str = "faction";
 
+// Hab module property for construction state.
+pub const TI_PROP_CONSTRUCTION_COMPLETED: &str = "constructionCompleted";
+
 // Faction filter UI strings.
 pub const EN_LABEL_FILTER_FACTION: &str = "Faction:";
 pub const EN_FILTER_ALL_FACTIONS: &str = "All Factions";
+
+// Construction filter UI strings.
+pub const EN_LABEL_FILTER_CONSTRUCTION: &str = "Construction:";
+pub const EN_FILTER_CONSTRUCTION_ALL: &str = "All";
+pub const EN_FILTER_CONSTRUCTION_COMPLETED: &str = "Completed";
+pub const EN_FILTER_CONSTRUCTION_IN_PROGRESS: &str = "In Progress";
