@@ -114,6 +114,9 @@ struct TiseApp {
 
     // Feature: filter TIHabModuleState objects by construction completion state.
     hab_module_construction_filter: HabModuleConstructionFilter,
+
+    // Feature: filter TICouncilorState objects by faction.
+    councilor_faction_filter: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -2747,6 +2750,10 @@ fn hab_faction_id(save: &crate::LoadedSave, hab_id: i64) -> Option<i64> {
     direct_faction_id(save, statics::TI_GROUP_HAB_STATE, hab_id)
 }
 
+fn councilor_faction_id(save: &crate::LoadedSave, councilor_id: i64) -> Option<i64> {
+    direct_faction_id(save, statics::TI_GROUP_COUNCILOR_STATE, councilor_id)
+}
+
 fn org_faction_id(save: &crate::LoadedSave, org_id: i64) -> Option<i64> {
     save.get_object_value(statics::TI_GROUP_ORG_STATE, org_id)?
         .get(statics::TI_PROP_FACTION_ORBIT)?
@@ -3687,6 +3694,22 @@ impl eframe::App for TiseApp {
                     ui.separator();
                 }
 
+                if group == statics::TI_GROUP_COUNCILOR_STATE {
+                    let mut factions: Vec<_> = objects_by_group
+                        .get(statics::TI_GROUP_FACTION_STATE)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    factions.sort_by_key(|f| f.display_name.to_lowercase());
+                    Self::render_faction_filter_combobox(
+                        ui,
+                        &factions,
+                        &mut self.councilor_faction_filter,
+                        id_to_display_name,
+                        "councilor_faction_filter",
+                    );
+                    ui.separator();
+                }
+
                 if group == statics::TI_GROUP_ORG_STATE {
                     let mut factions: Vec<_> = objects_by_group
                         .get(statics::TI_GROUP_FACTION_STATE)
@@ -3772,6 +3795,12 @@ impl eframe::App for TiseApp {
                     && let Some(faction_id) = self.hab_faction_filter
                 {
                     objects.retain(|obj| hab_faction_id(&save, obj.id) == Some(faction_id));
+                }
+
+                if group == statics::TI_GROUP_COUNCILOR_STATE
+                    && let Some(faction_id) = self.councilor_faction_filter
+                {
+                    objects.retain(|obj| councilor_faction_id(&save, obj.id) == Some(faction_id));
                 }
 
                 if group == statics::TI_GROUP_ORG_STATE {
