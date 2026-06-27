@@ -98,6 +98,57 @@ jobs:
           fi
           echo "OK: $max_glibc <= $allowed"
 
+      - name: Smoke test (headless launch)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="dist/tise-linux-x86_64-gnu"
+
+          # Install a virtual X server, a software OpenGL renderer (llvmpipe,
+          # since CI runners have no GPU), and the runtime GUI libs the binary
+          # dlopens at window-creation time. The build step installed the -dev
+          # packages for *linking*; these are the *runtime* counterparts that a
+          # user's machine would have but a bare runner does not.
+          sudo apt-get install -y \
+            xvfb \
+            libgl1 \
+            libegl1 \
+            libglx-mesa0 \
+            libgl1-mesa-dri \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libwayland-client0
+
+          # Layer 1: no-GUI path. Exits before run_gui(), so this only proves
+          # the binary loads and its hard-linked deps resolve. Fast + deterministic.
+          echo "::group::tise --version (load + no-GUI path)"
+          out=$(xvfb-run -a "$bin" --version)
+          echo "$out"
+          echo "$out" | grep -q '^tise '
+          echo "::endgroup::"
+
+          # Layer 2: the real GUI. This is the check that actually exercises the
+          # path that broke in v2.0.0 -- eframe creates a winit window and a GL
+          # context (libGL/xkbcommon dlopen here, not at --version). If the
+          # binary links but can't stand up a window, it panics in the first
+          # frame and exits non-zero *before* the timeout. We force software GL
+          # so it doesn't need a GPU, run under xvfb, and treat "still alive at
+          # the timeout" (exit 124) as success.
+          echo "::group::tise GUI launch under xvfb"
+          export LIBGL_ALWAYS_SOFTWARE=1
+          set +e
+          timeout 20 xvfb-run -a "$bin"
+          code=$?
+          set -e
+          echo "exit code: $code"
+          echo "::endgroup::"
+          if [[ "$code" -eq 124 ]]; then
+            echo "OK: GUI stayed up for 20s (window + GL context initialized)"
+          else
+            echo "FAIL: GUI exited early ($code) -- likely panicked during window/GL init"
+            exit 1
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

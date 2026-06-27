@@ -201,6 +201,21 @@ impl LoadedSave {
         Some(value)
     }
 
+    /// Returns the `Value` node of an object as a `&TiValue` (typically a
+    /// `TiValue::Object`). Unlike [`get_object_value`], this hands back the
+    /// node itself rather than the inner map, which lets callers compare or
+    /// walk whole subtrees with `TiValue`'s `PartialEq`. Used by the save-diff.
+    pub fn object_value_node(&self, group: &str, object_id: i64) -> Option<&TiValue> {
+        let (real_group, idx) = self.index.id_lookup.get(&object_id)?.clone();
+        if real_group != group {
+            return None;
+        }
+        let gamestates = self.root.get(statics::TI_GAMESTATES)?.as_object()?;
+        let group_list = gamestates.get(group)?.as_array()?;
+        let entry = group_list.get(idx)?.as_object()?;
+        entry.get(statics::TI_FIELD_VALUE_CAP)
+    }
+
     pub fn save_to_path(&mut self, path: &Path) -> anyhow::Result<()> {
         let target_format = if path.extension().and_then(|e| e.to_str()) == Some("gz") {
             SaveFormat::GzipJson5
