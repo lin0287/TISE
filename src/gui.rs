@@ -2684,9 +2684,13 @@ fn value_preview(val: &TiValue) -> String {
 
 fn hab_module_faction_id(save: &crate::LoadedSave, module_id: i64) -> Option<i64> {
     let module_val = save.get_object_value(statics::TI_GROUP_HAB_MODULE_STATE, module_id)?;
-    let sector_id = module_val.get(statics::TI_PROP_SECTOR)?.is_relational_ref()?;
+    let sector_id = module_val
+        .get(statics::TI_PROP_SECTOR)?
+        .is_relational_ref()?;
     let sector_val = save.get_object_value(statics::TI_GROUP_SECTOR_STATE, sector_id)?;
-    sector_val.get(statics::TI_PROP_FACTION)?.is_relational_ref()
+    sector_val
+        .get(statics::TI_PROP_FACTION)?
+        .is_relational_ref()
 }
 
 fn hab_module_construction_completed(save: &crate::LoadedSave, module_id: i64) -> Option<bool> {
@@ -3664,9 +3668,8 @@ impl eframe::App for TiseApp {
 
                 if group == statics::TI_GROUP_HAB_MODULE_STATE {
                     if let Some(faction_id) = self.hab_module_faction_filter {
-                        objects.retain(|obj| {
-                            hab_module_faction_id(&save, obj.id) == Some(faction_id)
-                        });
+                        objects
+                            .retain(|obj| hab_module_faction_id(&save, obj.id) == Some(faction_id));
                     }
                     match self.hab_module_construction_filter {
                         HabModuleConstructionFilter::All => {}
@@ -3772,9 +3775,11 @@ impl eframe::App for TiseApp {
 #[cfg(test)]
 mod tests {
     use super::TiseApp;
-    use super::{ItemSearchHit, ItemSortKey, hab_module_faction_id, hab_module_construction_completed};
-    use crate::{LoadedSave, TiValue, value::TiNumber};
+    use super::{
+        ItemSearchHit, ItemSortKey, hab_module_construction_completed, hab_module_faction_id,
+    };
     use crate::statics;
+    use crate::{LoadedSave, TiValue, value::TiNumber};
     use indexmap::IndexMap;
 
     fn make_ref(id: i64) -> TiValue {
@@ -3793,8 +3798,14 @@ mod tests {
             TiValue::Number(TiNumber::I64(id)),
         );
         let mut entry = IndexMap::new();
-        entry.insert(statics::TI_FIELD_KEY_CAP.to_string(), TiValue::Object(key_ref));
-        entry.insert(statics::TI_FIELD_VALUE_CAP.to_string(), TiValue::Object(props));
+        entry.insert(
+            statics::TI_FIELD_KEY_CAP.to_string(),
+            TiValue::Object(key_ref),
+        );
+        entry.insert(
+            statics::TI_FIELD_VALUE_CAP.to_string(),
+            TiValue::Object(props),
+        );
         TiValue::Object(entry)
     }
 
@@ -3814,7 +3825,10 @@ mod tests {
             TiValue::Array(vec![make_ti_entry(sector_id, sector_props)]),
         );
         let mut root = IndexMap::new();
-        root.insert(statics::TI_GAMESTATES.to_string(), TiValue::Object(gamestates));
+        root.insert(
+            statics::TI_GAMESTATES.to_string(),
+            TiValue::Object(gamestates),
+        );
         LoadedSave::from_root_for_test(TiValue::Object(root))
     }
 
@@ -3921,7 +3935,10 @@ mod tests {
         assert_eq!(hab_module_faction_id(&save, 100), None);
     }
 
-    fn make_construction_save(module_id: i64, construction_completed: Option<TiValue>) -> crate::LoadedSave {
+    fn make_construction_save(
+        module_id: i64,
+        construction_completed: Option<TiValue>,
+    ) -> crate::LoadedSave {
         let mut module_props = IndexMap::new();
         if let Some(val) = construction_completed {
             module_props.insert(statics::TI_PROP_CONSTRUCTION_COMPLETED.to_string(), val);
@@ -3933,7 +3950,10 @@ mod tests {
             TiValue::Array(vec![make_ti_entry(module_id, module_props)]),
         );
         let mut root = IndexMap::new();
-        root.insert(statics::TI_GAMESTATES.to_string(), TiValue::Object(gamestates));
+        root.insert(
+            statics::TI_GAMESTATES.to_string(),
+            TiValue::Object(gamestates),
+        );
         crate::LoadedSave::from_root_for_test(TiValue::Object(root))
     }
 
@@ -3963,10 +3983,8 @@ mod tests {
 
     #[test]
     fn hab_module_construction_completed_returns_none_when_prop_wrong_type() {
-        let save = make_construction_save(
-            10,
-            Some(TiValue::Number(crate::value::TiNumber::I64(1))),
-        );
+        let save =
+            make_construction_save(10, Some(TiValue::Number(crate::value::TiNumber::I64(1))));
         assert_eq!(hab_module_construction_completed(&save, 10), None);
     }
 }
