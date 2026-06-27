@@ -1742,6 +1742,30 @@ impl TiseApp {
         self.public_opinion_remainder = Some(1.0 - sum);
     }
 
+    fn render_faction_filter_combobox(
+        ui: &mut egui::Ui,
+        factions: &[&crate::save::ObjectSummary],
+        filter: &mut Option<i64>,
+        id_to_display_name: &std::collections::HashMap<i64, String>,
+        id_salt: &str,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(statics::EN_LABEL_FILTER_FACTION);
+            let selected_label = filter
+                .and_then(|id| id_to_display_name.get(&id))
+                .map(String::as_str)
+                .unwrap_or(statics::EN_FILTER_ALL_FACTIONS);
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(filter, None, statics::EN_FILTER_ALL_FACTIONS);
+                    for faction in factions {
+                        ui.selectable_value(filter, Some(faction.id), &faction.display_name);
+                    }
+                });
+        });
+    }
+
     fn render_properties_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -3599,68 +3623,34 @@ impl eframe::App for TiseApp {
                 };
 
                 if group == statics::TI_GROUP_HAB_STATE {
-                    ui.horizontal(|ui| {
-                        ui.label(statics::EN_LABEL_FILTER_FACTION);
-                        let mut factions: Vec<_> = objects_by_group
-                            .get(statics::TI_GROUP_FACTION_STATE)
-                            .map(|v| v.iter().collect())
-                            .unwrap_or_default();
-                        factions.sort_by_key(|f| f.display_name.to_lowercase());
-                        let selected_label = self
-                            .hab_faction_filter
-                            .and_then(|id| id_to_display_name.get(&id))
-                            .map(String::as_str)
-                            .unwrap_or(statics::EN_FILTER_ALL_FACTIONS);
-                        egui::ComboBox::from_id_salt("hab_faction_filter")
-                            .selected_text(selected_label)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.hab_faction_filter,
-                                    None,
-                                    statics::EN_FILTER_ALL_FACTIONS,
-                                );
-                                for faction in &factions {
-                                    ui.selectable_value(
-                                        &mut self.hab_faction_filter,
-                                        Some(faction.id),
-                                        &faction.display_name,
-                                    );
-                                }
-                            });
-                    });
+                    let mut factions: Vec<_> = objects_by_group
+                        .get(statics::TI_GROUP_FACTION_STATE)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    factions.sort_by_key(|f| f.display_name.to_lowercase());
+                    Self::render_faction_filter_combobox(
+                        ui,
+                        &factions,
+                        &mut self.hab_faction_filter,
+                        id_to_display_name,
+                        "hab_faction_filter",
+                    );
                     ui.separator();
                 }
 
                 if group == statics::TI_GROUP_HAB_MODULE_STATE {
-                    ui.horizontal(|ui| {
-                        ui.label(statics::EN_LABEL_FILTER_FACTION);
-                        let mut factions: Vec<_> = objects_by_group
-                            .get(statics::TI_GROUP_FACTION_STATE)
-                            .map(|v| v.iter().collect())
-                            .unwrap_or_default();
-                        factions.sort_by_key(|f| f.display_name.to_lowercase());
-                        let selected_label = self
-                            .hab_module_faction_filter
-                            .and_then(|id| id_to_display_name.get(&id))
-                            .map(String::as_str)
-                            .unwrap_or(statics::EN_FILTER_ALL_FACTIONS);
-                        egui::ComboBox::from_id_salt("hab_module_faction_filter")
-                            .selected_text(selected_label)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.hab_module_faction_filter,
-                                    None,
-                                    statics::EN_FILTER_ALL_FACTIONS,
-                                );
-                                for faction in &factions {
-                                    ui.selectable_value(
-                                        &mut self.hab_module_faction_filter,
-                                        Some(faction.id),
-                                        &faction.display_name,
-                                    );
-                                }
-                            });
-                    });
+                    let mut factions: Vec<_> = objects_by_group
+                        .get(statics::TI_GROUP_FACTION_STATE)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    factions.sort_by_key(|f| f.display_name.to_lowercase());
+                    Self::render_faction_filter_combobox(
+                        ui,
+                        &factions,
+                        &mut self.hab_module_faction_filter,
+                        id_to_display_name,
+                        "hab_module_faction_filter",
+                    );
                     ui.horizontal(|ui| {
                         ui.label(statics::EN_LABEL_FILTER_CONSTRUCTION);
                         egui::ComboBox::from_id_salt("hab_module_construction_filter")
@@ -3707,10 +3697,10 @@ impl eframe::App for TiseApp {
                     objects.sort_by_key(|o| o.display_name.to_lowercase());
                 }
 
-                if group == statics::TI_GROUP_HAB_STATE {
-                    if let Some(faction_id) = self.hab_faction_filter {
-                        objects.retain(|obj| hab_faction_id(&save, obj.id) == Some(faction_id));
-                    }
+                if group == statics::TI_GROUP_HAB_STATE
+                    && let Some(faction_id) = self.hab_faction_filter
+                {
+                    objects.retain(|obj| hab_faction_id(&save, obj.id) == Some(faction_id));
                 }
 
                 if group == statics::TI_GROUP_HAB_MODULE_STATE {
