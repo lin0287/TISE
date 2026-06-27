@@ -30,7 +30,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          # Stage as a draft so the artifacts can be smoke-tested (does the
+          # Linux binary actually launch?) before the release goes public.
+          # v2.0.0's Linux build had to be pulled post-publish; a draft makes
+          # that impossible. Flip to false here once you trust the pipeline.
+          draft: true
           files: |
             dist/windows/tise-windows-x86_64.exe
-            dist/linux-gnu/tise-linux-x86_64
+            dist/linux-gnu/tise-linux-x86_64-gnu
           fail_on_unmatched_files: true
