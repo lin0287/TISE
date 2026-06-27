@@ -194,12 +194,17 @@ pub const TI_PROP_PERSONAL_NAME: &str = "personalName";
 pub const TI_GROUP_COUNCILOR_STATE: &str = "PavonisInteractive.TerraInvicta.TICouncilorState";
 pub const TI_GROUP_HAB_STATE: &str = "PavonisInteractive.TerraInvicta.TIHabState";
 pub const TI_GROUP_HAB_MODULE_STATE: &str = "PavonisInteractive.TerraInvicta.TIHabModuleState";
+pub const TI_GROUP_ORG_STATE: &str = "PavonisInteractive.TerraInvicta.TIOrgState";
 pub const TI_GROUP_SECTOR_STATE: &str = "PavonisInteractive.TerraInvicta.TISectorState";
 pub const TI_GROUP_FACTION_STATE: &str = "PavonisInteractive.TerraInvicta.TIFactionState";
 
 // Hab module / sector properties used for faction filtering.
 pub const TI_PROP_SECTOR: &str = "sector";
 pub const TI_PROP_FACTION: &str = "faction";
+pub const TI_PROP_FACTION_ORBIT: &str = "factionOrbit";
+
+// Org properties.
+pub const TI_PROP_TIER: &str = "tier";
 
 // Hab module property for construction state.
 pub const TI_PROP_CONSTRUCTION_COMPLETED: &str = "constructionCompleted";
@@ -207,6 +212,10 @@ pub const TI_PROP_CONSTRUCTION_COMPLETED: &str = "constructionCompleted";
 // Faction filter UI strings.
 pub const EN_LABEL_FILTER_FACTION: &str = "Faction:";
 pub const EN_FILTER_ALL_FACTIONS: &str = "All Factions";
+
+// Tier filter UI strings.
+pub const EN_LABEL_FILTER_TIER: &str = "Tier:";
+pub const EN_FILTER_ALL_TIERS: &str = "All";
 
 // Construction filter UI strings.
 pub const EN_LABEL_FILTER_CONSTRUCTION: &str = "Construction:";

@@ -106,6 +106,12 @@ struct TiseApp {
     // Feature: filter TIHabModuleState objects by controlling faction.
     hab_module_faction_filter: Option<i64>,
 
+    // Feature: filter TIOrgState objects by controlling faction.
+    org_faction_filter: Option<i64>,
+
+    // Feature: filter TIOrgState objects by tier.
+    org_tier_filter: Option<i64>,
+
     // Feature: filter TIHabModuleState objects by construction completion state.
     hab_module_construction_filter: HabModuleConstructionFilter,
 }
@@ -1766,6 +1772,28 @@ impl TiseApp {
         });
     }
 
+    fn render_tier_filter_combobox(
+        ui: &mut egui::Ui,
+        filter: &mut Option<i64>,
+        tiers: &[i64],
+        id_salt: &str,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(statics::EN_LABEL_FILTER_TIER);
+            let selected_label = filter
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| statics::EN_FILTER_ALL_TIERS.to_string());
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(filter, None, statics::EN_FILTER_ALL_TIERS);
+                    for &tier in tiers {
+                        ui.selectable_value(filter, Some(tier), tier.to_string());
+                    }
+                });
+        });
+    }
+
     fn render_properties_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -2709,9 +2737,30 @@ fn value_preview(val: &TiValue) -> String {
     }
 }
 
+fn direct_faction_id(save: &crate::LoadedSave, group: &str, object_id: i64) -> Option<i64> {
+    save.get_object_value(group, object_id)?
+        .get(statics::TI_PROP_FACTION)?
+        .is_relational_ref()
+}
+
 fn hab_faction_id(save: &crate::LoadedSave, hab_id: i64) -> Option<i64> {
-    let hab_val = save.get_object_value(statics::TI_GROUP_HAB_STATE, hab_id)?;
-    hab_val.get(statics::TI_PROP_FACTION)?.is_relational_ref()
+    direct_faction_id(save, statics::TI_GROUP_HAB_STATE, hab_id)
+}
+
+fn org_faction_id(save: &crate::LoadedSave, org_id: i64) -> Option<i64> {
+    save.get_object_value(statics::TI_GROUP_ORG_STATE, org_id)?
+        .get(statics::TI_PROP_FACTION_ORBIT)?
+        .is_relational_ref()
+}
+
+fn org_tier(save: &crate::LoadedSave, org_id: i64) -> Option<i64> {
+    match save
+        .get_object_value(statics::TI_GROUP_ORG_STATE, org_id)?
+        .get(statics::TI_PROP_TIER)?
+    {
+        crate::TiValue::Number(n) => n.as_i64(),
+        _ => None,
+    }
 }
 
 fn hab_module_faction_id(save: &crate::LoadedSave, module_id: i64) -> Option<i64> {
@@ -3638,6 +3687,28 @@ impl eframe::App for TiseApp {
                     ui.separator();
                 }
 
+                if group == statics::TI_GROUP_ORG_STATE {
+                    let mut factions: Vec<_> = objects_by_group
+                        .get(statics::TI_GROUP_FACTION_STATE)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    factions.sort_by_key(|f| f.display_name.to_lowercase());
+                    Self::render_faction_filter_combobox(
+                        ui,
+                        &factions,
+                        &mut self.org_faction_filter,
+                        id_to_display_name,
+                        "org_faction_filter",
+                    );
+                    Self::render_tier_filter_combobox(
+                        ui,
+                        &mut self.org_tier_filter,
+                        &[1, 2, 3, 4, 5],
+                        "org_tier_filter",
+                    );
+                    ui.separator();
+                }
+
                 if group == statics::TI_GROUP_HAB_MODULE_STATE {
                     let mut factions: Vec<_> = objects_by_group
                         .get(statics::TI_GROUP_FACTION_STATE)
@@ -3701,6 +3772,15 @@ impl eframe::App for TiseApp {
                     && let Some(faction_id) = self.hab_faction_filter
                 {
                     objects.retain(|obj| hab_faction_id(&save, obj.id) == Some(faction_id));
+                }
+
+                if group == statics::TI_GROUP_ORG_STATE {
+                    if let Some(faction_id) = self.org_faction_filter {
+                        objects.retain(|obj| org_faction_id(&save, obj.id) == Some(faction_id));
+                    }
+                    if let Some(tier) = self.org_tier_filter {
+                        objects.retain(|obj| org_tier(&save, obj.id) == Some(tier));
+                    }
                 }
 
                 if group == statics::TI_GROUP_HAB_MODULE_STATE {
