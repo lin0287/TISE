@@ -100,6 +100,9 @@ struct TiseApp {
     // Theme.
     theme_dark: bool,
 
+    // Feature: filter TIHabState objects by controlling faction.
+    hab_faction_filter: Option<i64>,
+
     // Feature: filter TIHabModuleState objects by controlling faction.
     hab_module_faction_filter: Option<i64>,
 
@@ -2682,6 +2685,11 @@ fn value_preview(val: &TiValue) -> String {
     }
 }
 
+fn hab_faction_id(save: &crate::LoadedSave, hab_id: i64) -> Option<i64> {
+    let hab_val = save.get_object_value(statics::TI_GROUP_HAB_STATE, hab_id)?;
+    hab_val.get(statics::TI_PROP_FACTION)?.is_relational_ref()
+}
+
 fn hab_module_faction_id(save: &crate::LoadedSave, module_id: i64) -> Option<i64> {
     let module_val = save.get_object_value(statics::TI_GROUP_HAB_MODULE_STATE, module_id)?;
     let sector_id = module_val
@@ -3590,6 +3598,39 @@ impl eframe::App for TiseApp {
                     return;
                 };
 
+                if group == statics::TI_GROUP_HAB_STATE {
+                    ui.horizontal(|ui| {
+                        ui.label(statics::EN_LABEL_FILTER_FACTION);
+                        let mut factions: Vec<_> = objects_by_group
+                            .get(statics::TI_GROUP_FACTION_STATE)
+                            .map(|v| v.iter().collect())
+                            .unwrap_or_default();
+                        factions.sort_by_key(|f| f.display_name.to_lowercase());
+                        let selected_label = self
+                            .hab_faction_filter
+                            .and_then(|id| id_to_display_name.get(&id))
+                            .map(String::as_str)
+                            .unwrap_or(statics::EN_FILTER_ALL_FACTIONS);
+                        egui::ComboBox::from_id_salt("hab_faction_filter")
+                            .selected_text(selected_label)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.hab_faction_filter,
+                                    None,
+                                    statics::EN_FILTER_ALL_FACTIONS,
+                                );
+                                for faction in &factions {
+                                    ui.selectable_value(
+                                        &mut self.hab_faction_filter,
+                                        Some(faction.id),
+                                        &faction.display_name,
+                                    );
+                                }
+                            });
+                    });
+                    ui.separator();
+                }
+
                 if group == statics::TI_GROUP_HAB_MODULE_STATE {
                     ui.horizontal(|ui| {
                         ui.label(statics::EN_LABEL_FILTER_FACTION);
@@ -3664,6 +3705,12 @@ impl eframe::App for TiseApp {
                     objects.sort_by_key(|o| o.id);
                 } else {
                     objects.sort_by_key(|o| o.display_name.to_lowercase());
+                }
+
+                if group == statics::TI_GROUP_HAB_STATE {
+                    if let Some(faction_id) = self.hab_faction_filter {
+                        objects.retain(|obj| hab_faction_id(&save, obj.id) == Some(faction_id));
+                    }
                 }
 
                 if group == statics::TI_GROUP_HAB_MODULE_STATE {
