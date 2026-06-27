@@ -82,6 +82,32 @@ pub const EN_BTN_CHANGE_TYPE: &str = "Change Type...";
 
 pub const EN_WINDOW_CHANGE_TYPE: &str = "Change Type";
 
+// Save comparison (diff) feature.
+pub const EN_BTN_COMPARE: &str = "Compare...";
+pub const EN_WINDOW_DIFF: &str = "Compare Saves";
+pub const EN_DIFF_NO_OTHER: &str = "Pick another save to compare against the loaded one.";
+pub const EN_DIFF_IDENTICAL: &str = "No differences (after ignore rules).";
+pub const EN_DIFF_PREFIX_BEFORE: &str = "Before:";
+pub const EN_DIFF_PREFIX_AFTER: &str = "After:";
+pub const EN_DIFF_LABEL_ADDED: &str = "added";
+pub const EN_DIFF_LABEL_REMOVED: &str = "removed";
+pub const EN_DIFF_LABEL_CHANGED: &str = "changed";
+pub const EN_DIFF_GROUPS_ADDED: &str = "Groups added:";
+pub const EN_DIFF_GROUPS_REMOVED: &str = "Groups removed:";
+pub const EN_DIFF_KIND_ADDED: &str = "+";
+pub const EN_DIFF_KIND_REMOVED: &str = "-";
+pub const EN_DIFF_KIND_CHANGED: &str = "~";
+pub const EN_DIFF_IGNORE_HEADER: &str = "Filters";
+pub const EN_DIFF_IGNORE_NOISE_PRESET: &str = "Hide per-turn noise (history/event logs)";
+pub const EN_DIFF_SEARCH_LABEL: &str = "Search:";
+pub const EN_DIFF_SEARCH_HINT: &str = "object, id, field, value...";
+pub const EN_DIFF_SHOW_ALL_GROUPS: &str = "Show all changed groups";
+pub const EN_DIFF_VISIBLE_GROUPS_LABEL: &str = "Visible groups:";
+pub const EN_DIFF_BTN_IGNORE_ALL_GROUPS: &str = "Ignore all";
+pub const EN_DIFF_BTN_SHOW_ALL_GROUPS: &str = "Show all";
+pub const EN_DIFF_NO_MATCHES: &str = "No differences match the current filters.";
+pub const EN_DIFF_ERR_NO_SAVE: &str = "Load a save first, then Compare against another.";
+
 pub const EN_LABEL_REFERENCE_ID: &str = "Reference ID:";
 pub const EN_LABEL_VALUE: &str = "Value";
 pub const EN_PREFIX_VALUE: &str = "Value: ";

@@ -1,8 +1,9 @@
+use crate::diff::{self, IgnoreRules, SaveDiff};
 use crate::statics;
 use crate::{LoadedSave, TiValue};
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
-use std::{path::PathBuf, sync::OnceLock};
+use std::{collections::BTreeSet, path::PathBuf, sync::OnceLock};
 
 #[derive(Clone, Debug)]
 enum PublicOpinionDrag {
@@ -117,6 +118,25 @@ struct TiseApp {
 
     // Feature: filter TICouncilorState objects by faction.
     councilor_faction_filter: Option<i64>,
+
+    // Feature: Compare Saves (structural diff against another save file).
+    diff_open: bool,
+    /// Full, unfiltered diff cached from the last Compare. The window re-derives
+    /// the visible view via `SaveDiff::filtered`, so toggling ignore checkboxes
+    /// never re-reads the files.
+    diff_full: Option<SaveDiff>,
+    /// Path of the save we compared against (for the window header).
+    diff_other_path: Option<PathBuf>,
+    /// "Hide per-turn noise" preset toggle (on by default).
+    diff_hide_noise: bool,
+    /// Positive group filter: when true, show every changed group. When false,
+    /// show only the groups checked in `diff_visible_groups`.
+    diff_show_all_groups: bool,
+    /// Groups the user has explicitly checked to keep visible when
+    /// `diff_show_all_groups` is false.
+    diff_visible_groups: BTreeSet<String>,
+    /// Case-insensitive search/filter text for object metadata and fields.
+    diff_search: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -1548,6 +1568,315 @@ impl TiseApp {
         self.save_file_as();
     }
 
+    /// Open a file picker for the "other" save, diff it against the currently
+    /// loaded save, and cache the full (unfiltered) result. The second save's
+    /// tree is dropped inside `diff_against_path`, so we never hold two full
+    /// saves resident; only the small `SaveDiff` survives.
+    fn compare_against(&mut self) {
+        let Some(before) = self.save.as_ref() else {
+            self.last_error = Some(statics::EN_DIFF_ERR_NO_SAVE.to_string());
+            return;
+        };
+        let Some(path) = self.file_dialog().pick_file() else {
+            return;
+        };
+        match diff::diff_against_path(before, &path, &IgnoreRules::new()) {
+            Ok(full) => {
+                self.dialog_dir = path.parent().map(PathBuf::from);
+                self.diff_other_path = Some(path);
+                self.diff_full = Some(full);
+                self.diff_hide_noise = true;
+                self.diff_show_all_groups = true;
+                self.diff_visible_groups.clear();
+                self.diff_search.clear();
+                self.diff_open = true;
+                self.last_error = None;
+            }
+            Err(e) => {
+                self.last_error = Some(format!("Failed to compare: {e:#}"));
+            }
+        }
+    }
+
+    /// Build the active `IgnoreRules` for the diff window from the noise toggle.
+    /// Group visibility and search are positive view filters layered on top via
+    /// `SaveDiff::view_filtered`, not destructive ignore rules.
+    fn diff_ignore_rules(&self) -> IgnoreRules {
+        if self.diff_hide_noise {
+            IgnoreRules::default_noise_preset()
+        } else {
+            IgnoreRules::new()
+        }
+    }
+
+    /// Short display name for a gamestate group (strips the long TI namespace).
+    fn diff_group_label(group: &str) -> &str {
+        LoadedSave::group_display_name(group)
+    }
+
+    /// Render the Compare Saves window. The full diff is cached; this re-derives
+    /// the visible view each frame from the cheap pure filters, so changing the
+    /// search box or group selection never re-reads the files.
+    fn show_diff_window(&mut self, ctx: &egui::Context) {
+        let base = self
+            .diff_full
+            .as_ref()
+            .map(|full| full.filtered(&self.diff_ignore_rules()));
+        let changed_groups = base
+            .as_ref()
+            .map(SaveDiff::changed_groups)
+            .unwrap_or_default();
+
+        let other_name = self
+            .diff_other_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned());
+        let this_name = self
+            .save
+            .as_ref()
+            .and_then(|s| s.source_path.as_ref())
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned());
+
+        let mut open = self.diff_open;
+        let mut hide_noise = self.diff_hide_noise;
+        let mut show_all_groups = self.diff_show_all_groups;
+        let mut visible_groups = self.diff_visible_groups.clone();
+        let mut search = self.diff_search.clone();
+
+        egui::Window::new(statics::EN_WINDOW_DIFF)
+            .collapsible(true)
+            .resizable(true)
+            .open(&mut open)
+            .default_width(980.0)
+            .default_height(700.0)
+            .show(ctx, |ui| {
+                let Some(base) = base.as_ref() else {
+                    ui.label(statics::EN_DIFF_NO_OTHER);
+                    return;
+                };
+
+                // Capture the window's granted body height up front. A
+                // horizontal layout hugs its content height, so without forcing
+                // the row to claim the full height the nested scroll area only
+                // ever gets content-height to fill and the window snaps back to
+                // content size (defeating vertical resize). set_min_height makes
+                // the row, and therefore the results scroll area, fill the body.
+                let body_height = ui.available_height();
+
+                ui.horizontal(|ui| {
+                    ui.set_min_width(940.0);
+                    ui.set_min_height(body_height);
+
+                    // Left rail: filters and group selection.
+                    ui.vertical(|ui| {
+                        ui.set_width(260.0);
+                        ui.heading(statics::EN_DIFF_IGNORE_HEADER);
+                        ui.checkbox(&mut hide_noise, statics::EN_DIFF_IGNORE_NOISE_PRESET);
+                        ui.separator();
+
+                        ui.label(statics::EN_DIFF_SEARCH_LABEL);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut search)
+                                .hint_text(statics::EN_DIFF_SEARCH_HINT)
+                                .desired_width(240.0),
+                        );
+
+                        ui.separator();
+                        if ui
+                            .checkbox(&mut show_all_groups, statics::EN_DIFF_SHOW_ALL_GROUPS)
+                            .changed()
+                            && show_all_groups
+                        {
+                            visible_groups.clear();
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button(statics::EN_DIFF_BTN_IGNORE_ALL_GROUPS).clicked() {
+                                show_all_groups = false;
+                                visible_groups.clear();
+                            }
+                            if ui.button(statics::EN_DIFF_BTN_SHOW_ALL_GROUPS).clicked() {
+                                show_all_groups = true;
+                                visible_groups.clear();
+                            }
+                        });
+
+                        if !show_all_groups {
+                            ui.label(statics::EN_DIFF_VISIBLE_GROUPS_LABEL);
+                            egui::ScrollArea::vertical()
+                                .max_height(460.0)
+                                .id_salt("diff_visible_groups")
+                                .show(ui, |ui| {
+                                    for g in &changed_groups {
+                                        let mut on = visible_groups.contains(g);
+                                        if ui.checkbox(&mut on, Self::diff_group_label(g)).changed()
+                                        {
+                                            if on {
+                                                visible_groups.insert(g.clone());
+                                            } else {
+                                                visible_groups.remove(g);
+                                            }
+                                        }
+                                    }
+                                });
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Right rail: summary and results.
+                    ui.vertical(|ui| {
+                        let group_filter = if show_all_groups {
+                            None
+                        } else {
+                            Some(&visible_groups)
+                        };
+                        let view = base.view_filtered(group_filter, &search);
+
+                        if let Some(name) = &this_name {
+                            ui.label(format!("{} {}", statics::EN_DIFF_PREFIX_BEFORE, name));
+                        }
+                        if let Some(name) = &other_name {
+                            ui.label(format!("{} {}", statics::EN_DIFF_PREFIX_AFTER, name));
+                        }
+                        let (added, removed, changed) = view.summary_counts();
+                        ui.horizontal(|ui| {
+                            ui.colored_label(
+                                egui::Color32::LIGHT_GREEN,
+                                format!("{} {}", added, statics::EN_DIFF_LABEL_ADDED),
+                            );
+                            ui.colored_label(
+                                egui::Color32::LIGHT_RED,
+                                format!("{} {}", removed, statics::EN_DIFF_LABEL_REMOVED),
+                            );
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                format!("{} {}", changed, statics::EN_DIFF_LABEL_CHANGED),
+                            );
+                        });
+
+                        if !view.groups_added.is_empty() {
+                            ui.label(format!(
+                                "{} {}",
+                                statics::EN_DIFF_GROUPS_ADDED,
+                                view.groups_added
+                                    .iter()
+                                    .map(|g| Self::diff_group_label(g))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ));
+                        }
+                        if !view.groups_removed.is_empty() {
+                            ui.label(format!(
+                                "{} {}",
+                                statics::EN_DIFF_GROUPS_REMOVED,
+                                view.groups_removed
+                                    .iter()
+                                    .map(|g| Self::diff_group_label(g))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ));
+                        }
+
+                        ui.separator();
+
+                        if view.is_empty() {
+                            if base.is_empty() {
+                                ui.label(statics::EN_DIFF_IDENTICAL);
+                            } else {
+                                ui.label(statics::EN_DIFF_NO_MATCHES);
+                            }
+                            return;
+                        }
+
+                        egui::ScrollArea::vertical()
+                            .id_salt("diff_objects")
+                            .auto_shrink([false, false])
+                            .max_height(ui.available_height())
+                            .show(ui, |ui| {
+                                for obj in &view.objects {
+                                    let (glyph, color) = Self::diff_kind_visual(obj.kind);
+                                    let title = if obj.display_name.is_empty() {
+                                        format!(
+                                            "{}  {} #{}",
+                                            glyph,
+                                            Self::diff_group_label(&obj.group),
+                                            obj.id
+                                        )
+                                    } else {
+                                        format!(
+                                            "{}  {} #{}  ({})",
+                                            glyph,
+                                            Self::diff_group_label(&obj.group),
+                                            obj.id,
+                                            obj.display_name
+                                        )
+                                    };
+
+                                    if obj.field_changes.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new(title).monospace().color(color),
+                                        );
+                                    } else {
+                                        egui::CollapsingHeader::new(
+                                            egui::RichText::new(title).monospace().color(color),
+                                        )
+                                        .id_salt(("diff_obj", &obj.group, obj.id))
+                                        .show(ui, |ui| {
+                                            for fc in &obj.field_changes {
+                                                let before =
+                                                    Self::diff_value_preview(fc.before.as_ref());
+                                                let after =
+                                                    Self::diff_value_preview(fc.after.as_ref());
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{:<38}  {:<62} ->  {}",
+                                                        fc.path, before, after
+                                                    ))
+                                                    .monospace(),
+                                                );
+                                            }
+                                        });
+                                    }
+                                }
+                            });
+                    });
+                });
+            });
+
+        self.diff_open = open;
+        self.diff_hide_noise = hide_noise;
+        self.diff_show_all_groups = show_all_groups;
+        self.diff_visible_groups = visible_groups;
+        self.diff_search = search;
+    }
+
+    fn diff_kind_visual(kind: crate::DiffKind) -> (&'static str, egui::Color32) {
+        match kind {
+            crate::DiffKind::Added => (statics::EN_DIFF_KIND_ADDED, egui::Color32::LIGHT_GREEN),
+            crate::DiffKind::Removed => (statics::EN_DIFF_KIND_REMOVED, egui::Color32::LIGHT_RED),
+            crate::DiffKind::Changed => (statics::EN_DIFF_KIND_CHANGED, egui::Color32::YELLOW),
+        }
+    }
+
+    /// Compact one-line preview of a value side in a field change.
+    fn diff_value_preview(v: Option<&TiValue>) -> String {
+        match v {
+            None => statics::EN_LITERAL_MISSING.to_string(),
+            Some(val) => {
+                let s = val.to_json5_compact();
+                const MAX: usize = 60;
+                if s.chars().count() > MAX {
+                    let truncated: String = s.chars().take(MAX).collect();
+                    format!("{truncated}...")
+                } else {
+                    s
+                }
+            }
+        }
+    }
+
     fn save_file_as(&mut self) {
         let mut dlg = self.file_dialog();
         if let Some(save) = self.save.as_ref()
@@ -2962,6 +3291,13 @@ impl eframe::App for TiseApp {
                     self.save_file();
                 }
 
+                if ui
+                    .add_enabled(has_save, egui::Button::new(statics::EN_BTN_COMPARE))
+                    .clicked()
+                {
+                    self.compare_against();
+                }
+
                 if ui.button(statics::EN_BTN_ABOUT).clicked() {
                     self.about_open = true;
                 }
@@ -3133,6 +3469,10 @@ impl eframe::App for TiseApp {
                     );
                 });
             self.about_open = open;
+        }
+
+        if self.diff_open {
+            self.show_diff_window(ctx);
         }
 
         if let Some(err) = self.last_error.clone() {
