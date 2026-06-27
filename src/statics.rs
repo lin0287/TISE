@@ -212,6 +212,7 @@ pub const TI_PROP_CONSTRUCTION_COMPLETED: &str = "constructionCompleted";
 // Faction filter UI strings.
 pub const EN_LABEL_FILTER_FACTION: &str = "Faction:";
 pub const EN_FILTER_ALL_FACTIONS: &str = "All Factions";
+pub const EN_FILTER_NO_FACTION: &str = "None";
 
 // Tier filter UI strings.
 pub const EN_LABEL_FILTER_TIER: &str = "Tier:";

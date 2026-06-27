@@ -107,7 +107,7 @@ struct TiseApp {
     hab_module_faction_filter: Option<i64>,
 
     // Feature: filter TIOrgState objects by controlling faction.
-    org_faction_filter: Option<i64>,
+    org_faction_filter: OrgFactionFilter,
 
     // Feature: filter TIOrgState objects by tier.
     org_tier_filter: Option<i64>,
@@ -125,6 +125,14 @@ enum HabModuleConstructionFilter {
     All,
     Completed,
     InProgress,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum OrgFactionFilter {
+    #[default]
+    All,
+    NoFaction,
+    Faction(i64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -1770,6 +1778,39 @@ impl TiseApp {
                     ui.selectable_value(filter, None, statics::EN_FILTER_ALL_FACTIONS);
                     for faction in factions {
                         ui.selectable_value(filter, Some(faction.id), &faction.display_name);
+                    }
+                });
+        });
+    }
+
+    fn render_org_faction_filter_combobox(
+        ui: &mut egui::Ui,
+        factions: &[&crate::save::ObjectSummary],
+        filter: &mut OrgFactionFilter,
+        id_to_display_name: &std::collections::HashMap<i64, String>,
+        id_salt: &str,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(statics::EN_LABEL_FILTER_FACTION);
+            let selected_label = match filter {
+                OrgFactionFilter::All => statics::EN_FILTER_ALL_FACTIONS.to_string(),
+                OrgFactionFilter::NoFaction => statics::EN_FILTER_NO_FACTION.to_string(),
+                OrgFactionFilter::Faction(id) => id_to_display_name
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| statics::EN_FILTER_ALL_FACTIONS.to_string()),
+            };
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(filter, OrgFactionFilter::All, statics::EN_FILTER_ALL_FACTIONS);
+                    ui.selectable_value(filter, OrgFactionFilter::NoFaction, statics::EN_FILTER_NO_FACTION);
+                    for faction in factions {
+                        ui.selectable_value(
+                            filter,
+                            OrgFactionFilter::Faction(faction.id),
+                            &faction.display_name,
+                        );
                     }
                 });
         });
@@ -3716,7 +3757,7 @@ impl eframe::App for TiseApp {
                         .map(|v| v.iter().collect())
                         .unwrap_or_default();
                     factions.sort_by_key(|f| f.display_name.to_lowercase());
-                    Self::render_faction_filter_combobox(
+                    Self::render_org_faction_filter_combobox(
                         ui,
                         &factions,
                         &mut self.org_faction_filter,
@@ -3804,8 +3845,14 @@ impl eframe::App for TiseApp {
                 }
 
                 if group == statics::TI_GROUP_ORG_STATE {
-                    if let Some(faction_id) = self.org_faction_filter {
-                        objects.retain(|obj| org_faction_id(&save, obj.id) == Some(faction_id));
+                    match self.org_faction_filter {
+                        OrgFactionFilter::All => {}
+                        OrgFactionFilter::NoFaction => {
+                            objects.retain(|obj| org_faction_id(&save, obj.id).is_none());
+                        }
+                        OrgFactionFilter::Faction(faction_id) => {
+                            objects.retain(|obj| org_faction_id(&save, obj.id) == Some(faction_id));
+                        }
                     }
                     if let Some(tier) = self.org_tier_filter {
                         objects.retain(|obj| org_tier(&save, obj.id) == Some(tier));
