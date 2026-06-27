@@ -1071,6 +1071,62 @@ impl TiseApp {
         })
     }
 
+    /// The primitive type labels selectable per-row in the simple list editor.
+    /// Kept to primitives so converting a row never knocks the list out of the
+    /// "simple list" shape that this editor handles.
+    const SIMPLE_LIST_TYPE_LABELS: [&'static str; 6] = [
+        statics::EN_TYPE_NULL,
+        statics::EN_TYPE_BOOL,
+        statics::EN_TYPE_I64,
+        statics::EN_TYPE_U64,
+        statics::EN_TYPE_F64,
+        statics::EN_TYPE_STRING,
+    ];
+
+    /// Map a primitive value to the stable type label used by the type pickers.
+    /// Non-primitives never appear in a simple list, but we fall back to `null`.
+    fn primitive_type_label(v: &TiValue) -> &'static str {
+        match v {
+            TiValue::Null => statics::EN_TYPE_NULL,
+            TiValue::Bool(_) => statics::EN_TYPE_BOOL,
+            TiValue::Number(crate::value::TiNumber::I64(_)) => statics::EN_TYPE_I64,
+            TiValue::Number(crate::value::TiNumber::U64(_)) => statics::EN_TYPE_U64,
+            TiValue::Number(crate::value::TiNumber::F64(_)) => statics::EN_TYPE_F64,
+            TiValue::String(_) => statics::EN_TYPE_STRING,
+            _ => statics::EN_TYPE_NULL,
+        }
+    }
+
+    /// Determine the most common primitive type label in a list.
+    /// Ties are broken in favor of the type that appears earliest in the list.
+    /// Returns `None` for an empty list.
+    fn majority_primitive_label(arr: &[TiValue]) -> Option<&'static str> {
+        // (label, count, first-seen index). Small N, so a linear scan beats a map.
+        let mut counts: Vec<(&'static str, usize, usize)> = Vec::new();
+        for (i, v) in arr.iter().enumerate() {
+            let label = Self::primitive_type_label(v);
+            if let Some(entry) = counts.iter_mut().find(|(l, _, _)| *l == label) {
+                entry.1 += 1;
+            } else {
+                counts.push((label, 1, i));
+            }
+        }
+        // Highest count wins; on a tie the smaller first-seen index wins.
+        counts
+            .into_iter()
+            .max_by(|a, b| a.1.cmp(&b.1).then(b.2.cmp(&a.2)))
+            .map(|(label, _, _)| label)
+    }
+
+    /// Build the default value for a newly added/inserted list item, defaulting
+    /// to a zero value of the list's majority type (empty list -> null).
+    fn default_new_list_item(arr: &[TiValue]) -> TiValue {
+        match Self::majority_primitive_label(arr) {
+            Some(label) => Self::coerce_value_to_type(label, &TiValue::Null),
+            None => TiValue::Null,
+        }
+    }
+
     fn render_simple_list_editor(ui: &mut egui::Ui, arr: &mut Vec<TiValue>) -> bool {
         let mut changed_any = false;
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
@@ -1174,7 +1230,21 @@ impl TiseApp {
                                 }
                             });
                             row.col(|ui| {
-                                ui.monospace(v.type_name());
+                                let current_label = Self::primitive_type_label(v);
+                                egui::ComboBox::from_id_salt(("simple_list_type", idx))
+                                    .selected_text(current_label)
+                                    .show_ui(ui, |ui| {
+                                        for label in Self::SIMPLE_LIST_TYPE_LABELS {
+                                            if ui
+                                                .selectable_label(current_label == label, label)
+                                                .clicked()
+                                                && current_label != label
+                                            {
+                                                *v = Self::coerce_value_to_type(label, v);
+                                                changed_any = true;
+                                            }
+                                        }
+                                    });
                             });
                             row.col(|ui| {
                                 ui.horizontal(|ui| {
@@ -1207,7 +1277,8 @@ impl TiseApp {
                 }
                 ListOp::Insert(idx) => {
                     if idx <= arr.len() {
-                        arr.insert(idx, TiValue::Null);
+                        let item = Self::default_new_list_item(arr);
+                        arr.insert(idx, item);
                         changed_any = true;
                     }
                 }
@@ -1228,7 +1299,8 @@ impl TiseApp {
 
         ui.horizontal(|ui| {
             if ui.button(statics::EN_BTN_ADD_ITEM).clicked() {
-                arr.push(TiValue::Null);
+                let item = Self::default_new_list_item(arr);
+                arr.push(item);
                 changed_any = true;
             }
         });
@@ -4132,5 +4204,95 @@ mod tests {
         let save =
             make_construction_save(10, Some(TiValue::Number(crate::value::TiNumber::I64(1))));
         assert_eq!(hab_module_construction_completed(&save, 10), None);
+    }
+
+    #[test]
+    fn primitive_type_label_maps_each_primitive() {
+        assert_eq!(
+            TiseApp::primitive_type_label(&TiValue::Null),
+            statics::EN_TYPE_NULL
+        );
+        assert_eq!(
+            TiseApp::primitive_type_label(&TiValue::Bool(true)),
+            statics::EN_TYPE_BOOL
+        );
+        assert_eq!(
+            TiseApp::primitive_type_label(&TiValue::Number(TiNumber::I64(-1))),
+            statics::EN_TYPE_I64
+        );
+        assert_eq!(
+            TiseApp::primitive_type_label(&TiValue::Number(TiNumber::U64(1))),
+            statics::EN_TYPE_U64
+        );
+        assert_eq!(
+            TiseApp::primitive_type_label(&TiValue::Number(TiNumber::F64(1.5))),
+            statics::EN_TYPE_F64
+        );
+        assert_eq!(
+            TiseApp::primitive_type_label(&TiValue::String("x".to_string())),
+            statics::EN_TYPE_STRING
+        );
+    }
+
+    #[test]
+    fn majority_primitive_label_picks_most_common() {
+        let arr = vec![
+            TiValue::String("a".to_string()),
+            TiValue::String("b".to_string()),
+            TiValue::Number(TiNumber::I64(1)),
+        ];
+        assert_eq!(
+            TiseApp::majority_primitive_label(&arr),
+            Some(statics::EN_TYPE_STRING)
+        );
+    }
+
+    #[test]
+    fn majority_primitive_label_empty_is_none() {
+        assert_eq!(TiseApp::majority_primitive_label(&[]), None);
+    }
+
+    #[test]
+    fn majority_primitive_label_tie_prefers_earliest() {
+        // One bool, one string: tie at count 1. Bool appears first, so it wins.
+        let arr = vec![TiValue::Bool(true), TiValue::String("a".to_string())];
+        assert_eq!(
+            TiseApp::majority_primitive_label(&arr),
+            Some(statics::EN_TYPE_BOOL)
+        );
+        // Reverse order: string now appears first and wins the tie.
+        let arr = vec![TiValue::String("a".to_string()), TiValue::Bool(true)];
+        assert_eq!(
+            TiseApp::majority_primitive_label(&arr),
+            Some(statics::EN_TYPE_STRING)
+        );
+    }
+
+    #[test]
+    fn default_new_list_item_uses_majority_type_zero_value() {
+        // Majority I64 -> new item is I64(0).
+        let arr = vec![
+            TiValue::Number(TiNumber::I64(7)),
+            TiValue::Number(TiNumber::I64(8)),
+            TiValue::String("x".to_string()),
+        ];
+        assert_eq!(
+            TiseApp::default_new_list_item(&arr),
+            TiValue::Number(TiNumber::I64(0))
+        );
+
+        // Majority String -> new item is empty string.
+        let arr = vec![
+            TiValue::String("a".to_string()),
+            TiValue::String("b".to_string()),
+            TiValue::Bool(true),
+        ];
+        assert_eq!(
+            TiseApp::default_new_list_item(&arr),
+            TiValue::String(String::new())
+        );
+
+        // Empty list -> null fallback.
+        assert_eq!(TiseApp::default_new_list_item(&[]), TiValue::Null);
     }
 }
