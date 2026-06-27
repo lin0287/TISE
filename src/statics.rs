@@ -192,6 +192,7 @@ pub const TI_PROP_PERSONAL_NAME: &str = "personalName";
 
 // Common group names.
 pub const TI_GROUP_COUNCILOR_STATE: &str = "PavonisInteractive.TerraInvicta.TICouncilorState";
+pub const TI_GROUP_HAB_STATE: &str = "PavonisInteractive.TerraInvicta.TIHabState";
 pub const TI_GROUP_HAB_MODULE_STATE: &str = "PavonisInteractive.TerraInvicta.TIHabModuleState";
 pub const TI_GROUP_SECTOR_STATE: &str = "PavonisInteractive.TerraInvicta.TISectorState";
 pub const TI_GROUP_FACTION_STATE: &str = "PavonisInteractive.TerraInvicta.TIFactionState";
