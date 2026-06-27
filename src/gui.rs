@@ -99,6 +99,32 @@ struct TiseApp {
 
     // Theme.
     theme_dark: bool,
+
+    // Feature: filter TIHabState objects by controlling faction.
+    hab_faction_filter: Option<i64>,
+
+    // Feature: filter TIHabModuleState objects by controlling faction.
+    hab_module_faction_filter: Option<i64>,
+
+    // Feature: filter TIOrgState objects by controlling faction.
+    org_faction_filter: Option<i64>,
+
+    // Feature: filter TIOrgState objects by tier.
+    org_tier_filter: Option<i64>,
+
+    // Feature: filter TIHabModuleState objects by construction completion state.
+    hab_module_construction_filter: HabModuleConstructionFilter,
+
+    // Feature: filter TICouncilorState objects by faction.
+    councilor_faction_filter: Option<i64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+enum HabModuleConstructionFilter {
+    #[default]
+    All,
+    Completed,
+    InProgress,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -1725,6 +1751,52 @@ impl TiseApp {
         self.public_opinion_remainder = Some(1.0 - sum);
     }
 
+    fn render_faction_filter_combobox(
+        ui: &mut egui::Ui,
+        factions: &[&crate::save::ObjectSummary],
+        filter: &mut Option<i64>,
+        id_to_display_name: &std::collections::HashMap<i64, String>,
+        id_salt: &str,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(statics::EN_LABEL_FILTER_FACTION);
+            let selected_label = filter
+                .and_then(|id| id_to_display_name.get(&id))
+                .map(String::as_str)
+                .unwrap_or(statics::EN_FILTER_ALL_FACTIONS);
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(filter, None, statics::EN_FILTER_ALL_FACTIONS);
+                    for faction in factions {
+                        ui.selectable_value(filter, Some(faction.id), &faction.display_name);
+                    }
+                });
+        });
+    }
+
+    fn render_tier_filter_combobox(
+        ui: &mut egui::Ui,
+        filter: &mut Option<i64>,
+        tiers: &[i64],
+        id_salt: &str,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(statics::EN_LABEL_FILTER_TIER);
+            let selected_label = filter
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| statics::EN_FILTER_ALL_TIERS.to_string());
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(filter, None, statics::EN_FILTER_ALL_TIERS);
+                    for &tier in tiers {
+                        ui.selectable_value(filter, Some(tier), tier.to_string());
+                    }
+                });
+        });
+    }
+
     fn render_properties_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -2668,6 +2740,55 @@ fn value_preview(val: &TiValue) -> String {
     }
 }
 
+fn direct_faction_id(save: &crate::LoadedSave, group: &str, object_id: i64) -> Option<i64> {
+    save.get_object_value(group, object_id)?
+        .get(statics::TI_PROP_FACTION)?
+        .is_relational_ref()
+}
+
+fn hab_faction_id(save: &crate::LoadedSave, hab_id: i64) -> Option<i64> {
+    direct_faction_id(save, statics::TI_GROUP_HAB_STATE, hab_id)
+}
+
+fn councilor_faction_id(save: &crate::LoadedSave, councilor_id: i64) -> Option<i64> {
+    direct_faction_id(save, statics::TI_GROUP_COUNCILOR_STATE, councilor_id)
+}
+
+fn org_faction_id(save: &crate::LoadedSave, org_id: i64) -> Option<i64> {
+    save.get_object_value(statics::TI_GROUP_ORG_STATE, org_id)?
+        .get(statics::TI_PROP_FACTION_ORBIT)?
+        .is_relational_ref()
+}
+
+fn org_tier(save: &crate::LoadedSave, org_id: i64) -> Option<i64> {
+    match save
+        .get_object_value(statics::TI_GROUP_ORG_STATE, org_id)?
+        .get(statics::TI_PROP_TIER)?
+    {
+        crate::TiValue::Number(n) => n.as_i64(),
+        _ => None,
+    }
+}
+
+fn hab_module_faction_id(save: &crate::LoadedSave, module_id: i64) -> Option<i64> {
+    let module_val = save.get_object_value(statics::TI_GROUP_HAB_MODULE_STATE, module_id)?;
+    let sector_id = module_val
+        .get(statics::TI_PROP_SECTOR)?
+        .is_relational_ref()?;
+    let sector_val = save.get_object_value(statics::TI_GROUP_SECTOR_STATE, sector_id)?;
+    sector_val
+        .get(statics::TI_PROP_FACTION)?
+        .is_relational_ref()
+}
+
+fn hab_module_construction_completed(save: &crate::LoadedSave, module_id: i64) -> Option<bool> {
+    let module_val = save.get_object_value(statics::TI_GROUP_HAB_MODULE_STATE, module_id)?;
+    match module_val.get(statics::TI_PROP_CONSTRUCTION_COMPLETED)? {
+        crate::TiValue::Bool(b) => Some(*b),
+        _ => None,
+    }
+}
+
 fn array_of_relational_refs(val: &TiValue) -> Option<Vec<i64>> {
     let TiValue::Array(items) = val else {
         return None;
@@ -3557,6 +3678,108 @@ impl eframe::App for TiseApp {
                     return;
                 };
 
+                if group == statics::TI_GROUP_HAB_STATE {
+                    let mut factions: Vec<_> = objects_by_group
+                        .get(statics::TI_GROUP_FACTION_STATE)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    factions.sort_by_key(|f| f.display_name.to_lowercase());
+                    Self::render_faction_filter_combobox(
+                        ui,
+                        &factions,
+                        &mut self.hab_faction_filter,
+                        id_to_display_name,
+                        "hab_faction_filter",
+                    );
+                    ui.separator();
+                }
+
+                if group == statics::TI_GROUP_COUNCILOR_STATE {
+                    let mut factions: Vec<_> = objects_by_group
+                        .get(statics::TI_GROUP_FACTION_STATE)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    factions.sort_by_key(|f| f.display_name.to_lowercase());
+                    Self::render_faction_filter_combobox(
+                        ui,
+                        &factions,
+                        &mut self.councilor_faction_filter,
+                        id_to_display_name,
+                        "councilor_faction_filter",
+                    );
+                    ui.separator();
+                }
+
+                if group == statics::TI_GROUP_ORG_STATE {
+                    let mut factions: Vec<_> = objects_by_group
+                        .get(statics::TI_GROUP_FACTION_STATE)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    factions.sort_by_key(|f| f.display_name.to_lowercase());
+                    Self::render_faction_filter_combobox(
+                        ui,
+                        &factions,
+                        &mut self.org_faction_filter,
+                        id_to_display_name,
+                        "org_faction_filter",
+                    );
+                    Self::render_tier_filter_combobox(
+                        ui,
+                        &mut self.org_tier_filter,
+                        &[1, 2, 3, 4, 5],
+                        "org_tier_filter",
+                    );
+                    ui.separator();
+                }
+
+                if group == statics::TI_GROUP_HAB_MODULE_STATE {
+                    let mut factions: Vec<_> = objects_by_group
+                        .get(statics::TI_GROUP_FACTION_STATE)
+                        .map(|v| v.iter().collect())
+                        .unwrap_or_default();
+                    factions.sort_by_key(|f| f.display_name.to_lowercase());
+                    Self::render_faction_filter_combobox(
+                        ui,
+                        &factions,
+                        &mut self.hab_module_faction_filter,
+                        id_to_display_name,
+                        "hab_module_faction_filter",
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label(statics::EN_LABEL_FILTER_CONSTRUCTION);
+                        egui::ComboBox::from_id_salt("hab_module_construction_filter")
+                            .selected_text(match self.hab_module_construction_filter {
+                                HabModuleConstructionFilter::All => {
+                                    statics::EN_FILTER_CONSTRUCTION_ALL
+                                }
+                                HabModuleConstructionFilter::Completed => {
+                                    statics::EN_FILTER_CONSTRUCTION_COMPLETED
+                                }
+                                HabModuleConstructionFilter::InProgress => {
+                                    statics::EN_FILTER_CONSTRUCTION_IN_PROGRESS
+                                }
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.hab_module_construction_filter,
+                                    HabModuleConstructionFilter::All,
+                                    statics::EN_FILTER_CONSTRUCTION_ALL,
+                                );
+                                ui.selectable_value(
+                                    &mut self.hab_module_construction_filter,
+                                    HabModuleConstructionFilter::Completed,
+                                    statics::EN_FILTER_CONSTRUCTION_COMPLETED,
+                                );
+                                ui.selectable_value(
+                                    &mut self.hab_module_construction_filter,
+                                    HabModuleConstructionFilter::InProgress,
+                                    statics::EN_FILTER_CONSTRUCTION_IN_PROGRESS,
+                                );
+                            });
+                    });
+                    ui.separator();
+                }
+
                 let mut objects: Vec<_> = objects_by_group
                     .get(&group)
                     .map(|v| v.iter().collect())
@@ -3566,6 +3789,47 @@ impl eframe::App for TiseApp {
                     objects.sort_by_key(|o| o.id);
                 } else {
                     objects.sort_by_key(|o| o.display_name.to_lowercase());
+                }
+
+                if group == statics::TI_GROUP_HAB_STATE
+                    && let Some(faction_id) = self.hab_faction_filter
+                {
+                    objects.retain(|obj| hab_faction_id(&save, obj.id) == Some(faction_id));
+                }
+
+                if group == statics::TI_GROUP_COUNCILOR_STATE
+                    && let Some(faction_id) = self.councilor_faction_filter
+                {
+                    objects.retain(|obj| councilor_faction_id(&save, obj.id) == Some(faction_id));
+                }
+
+                if group == statics::TI_GROUP_ORG_STATE {
+                    if let Some(faction_id) = self.org_faction_filter {
+                        objects.retain(|obj| org_faction_id(&save, obj.id) == Some(faction_id));
+                    }
+                    if let Some(tier) = self.org_tier_filter {
+                        objects.retain(|obj| org_tier(&save, obj.id) == Some(tier));
+                    }
+                }
+
+                if group == statics::TI_GROUP_HAB_MODULE_STATE {
+                    if let Some(faction_id) = self.hab_module_faction_filter {
+                        objects
+                            .retain(|obj| hab_module_faction_id(&save, obj.id) == Some(faction_id));
+                    }
+                    match self.hab_module_construction_filter {
+                        HabModuleConstructionFilter::All => {}
+                        HabModuleConstructionFilter::Completed => {
+                            objects.retain(|obj| {
+                                hab_module_construction_completed(&save, obj.id) == Some(true)
+                            });
+                        }
+                        HabModuleConstructionFilter::InProgress => {
+                            objects.retain(|obj| {
+                                hab_module_construction_completed(&save, obj.id) != Some(true)
+                            });
+                        }
+                    }
                 }
 
                 let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
@@ -3657,9 +3921,62 @@ impl eframe::App for TiseApp {
 #[cfg(test)]
 mod tests {
     use super::TiseApp;
-    use super::{ItemSearchHit, ItemSortKey};
-    use crate::{TiValue, value::TiNumber};
+    use super::{
+        ItemSearchHit, ItemSortKey, hab_module_construction_completed, hab_module_faction_id,
+    };
+    use crate::statics;
+    use crate::{LoadedSave, TiValue, value::TiNumber};
     use indexmap::IndexMap;
+
+    fn make_ref(id: i64) -> TiValue {
+        let mut map = IndexMap::new();
+        map.insert(
+            statics::TI_REF_FIELD_VALUE.to_string(),
+            TiValue::Number(TiNumber::I64(id)),
+        );
+        TiValue::Object(map)
+    }
+
+    fn make_ti_entry(id: i64, props: IndexMap<String, TiValue>) -> TiValue {
+        let mut key_ref = IndexMap::new();
+        key_ref.insert(
+            statics::TI_REF_FIELD_VALUE.to_string(),
+            TiValue::Number(TiNumber::I64(id)),
+        );
+        let mut entry = IndexMap::new();
+        entry.insert(
+            statics::TI_FIELD_KEY_CAP.to_string(),
+            TiValue::Object(key_ref),
+        );
+        entry.insert(
+            statics::TI_FIELD_VALUE_CAP.to_string(),
+            TiValue::Object(props),
+        );
+        TiValue::Object(entry)
+    }
+
+    fn make_hab_save(
+        module_id: i64,
+        module_props: IndexMap<String, TiValue>,
+        sector_id: i64,
+        sector_props: IndexMap<String, TiValue>,
+    ) -> LoadedSave {
+        let mut gamestates = IndexMap::new();
+        gamestates.insert(
+            statics::TI_GROUP_HAB_MODULE_STATE.to_string(),
+            TiValue::Array(vec![make_ti_entry(module_id, module_props)]),
+        );
+        gamestates.insert(
+            statics::TI_GROUP_SECTOR_STATE.to_string(),
+            TiValue::Array(vec![make_ti_entry(sector_id, sector_props)]),
+        );
+        let mut root = IndexMap::new();
+        root.insert(
+            statics::TI_GAMESTATES.to_string(),
+            TiValue::Object(gamestates),
+        );
+        LoadedSave::from_root_for_test(TiValue::Object(root))
+    }
 
     #[test]
     fn is_simple_list_accepts_primitives_only() {
@@ -3714,5 +4031,106 @@ mod tests {
         TiseApp::sort_item_search_hits(&mut hits, ItemSortKey::Id, true);
         assert_eq!(hits[0].object_id, 2);
         assert_eq!(hits[1].object_id, 5);
+    }
+
+    #[test]
+    fn hab_module_faction_id_resolves_full_chain() {
+        let mut module_props = IndexMap::new();
+        module_props.insert(statics::TI_PROP_SECTOR.to_string(), make_ref(200));
+        let mut sector_props = IndexMap::new();
+        sector_props.insert(statics::TI_PROP_FACTION.to_string(), make_ref(300));
+        let save = make_hab_save(100, module_props, 200, sector_props);
+        assert_eq!(hab_module_faction_id(&save, 100), Some(300));
+    }
+
+    #[test]
+    fn hab_module_faction_id_returns_none_for_unknown_module() {
+        let mut module_props = IndexMap::new();
+        module_props.insert(statics::TI_PROP_SECTOR.to_string(), make_ref(200));
+        let mut sector_props = IndexMap::new();
+        sector_props.insert(statics::TI_PROP_FACTION.to_string(), make_ref(300));
+        let save = make_hab_save(100, module_props, 200, sector_props);
+        assert_eq!(hab_module_faction_id(&save, 999), None);
+    }
+
+    #[test]
+    fn hab_module_faction_id_returns_none_when_sector_prop_missing() {
+        let module_props = IndexMap::new(); // no "sector" key
+        let sector_props = IndexMap::new();
+        let save = make_hab_save(100, module_props, 200, sector_props);
+        assert_eq!(hab_module_faction_id(&save, 100), None);
+    }
+
+    #[test]
+    fn hab_module_faction_id_returns_none_when_sector_not_found() {
+        // Module points at sector 999, but only sector 200 exists.
+        let mut module_props = IndexMap::new();
+        module_props.insert(statics::TI_PROP_SECTOR.to_string(), make_ref(999));
+        let mut sector_props = IndexMap::new();
+        sector_props.insert(statics::TI_PROP_FACTION.to_string(), make_ref(300));
+        let save = make_hab_save(100, module_props, 200, sector_props);
+        assert_eq!(hab_module_faction_id(&save, 100), None);
+    }
+
+    #[test]
+    fn hab_module_faction_id_returns_none_when_faction_prop_missing() {
+        let mut module_props = IndexMap::new();
+        module_props.insert(statics::TI_PROP_SECTOR.to_string(), make_ref(200));
+        let sector_props = IndexMap::new(); // no "faction" key
+        let save = make_hab_save(100, module_props, 200, sector_props);
+        assert_eq!(hab_module_faction_id(&save, 100), None);
+    }
+
+    fn make_construction_save(
+        module_id: i64,
+        construction_completed: Option<TiValue>,
+    ) -> crate::LoadedSave {
+        let mut module_props = IndexMap::new();
+        if let Some(val) = construction_completed {
+            module_props.insert(statics::TI_PROP_CONSTRUCTION_COMPLETED.to_string(), val);
+        }
+        // sector is not needed for construction tests; use a dummy sector with no entries
+        let mut gamestates = IndexMap::new();
+        gamestates.insert(
+            statics::TI_GROUP_HAB_MODULE_STATE.to_string(),
+            TiValue::Array(vec![make_ti_entry(module_id, module_props)]),
+        );
+        let mut root = IndexMap::new();
+        root.insert(
+            statics::TI_GAMESTATES.to_string(),
+            TiValue::Object(gamestates),
+        );
+        crate::LoadedSave::from_root_for_test(TiValue::Object(root))
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_true_when_complete() {
+        let save = make_construction_save(10, Some(TiValue::Bool(true)));
+        assert_eq!(hab_module_construction_completed(&save, 10), Some(true));
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_false_when_in_progress() {
+        let save = make_construction_save(10, Some(TiValue::Bool(false)));
+        assert_eq!(hab_module_construction_completed(&save, 10), Some(false));
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_none_when_prop_missing() {
+        let save = make_construction_save(10, None);
+        assert_eq!(hab_module_construction_completed(&save, 10), None);
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_none_for_unknown_module() {
+        let save = make_construction_save(10, Some(TiValue::Bool(true)));
+        assert_eq!(hab_module_construction_completed(&save, 999), None);
+    }
+
+    #[test]
+    fn hab_module_construction_completed_returns_none_when_prop_wrong_type() {
+        let save =
+            make_construction_save(10, Some(TiValue::Number(crate::value::TiNumber::I64(1))));
+        assert_eq!(hab_module_construction_completed(&save, 10), None);
     }
 }

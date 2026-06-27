@@ -100,6 +100,21 @@ impl LoadedSave {
         self.index = build_index(&self.root);
     }
 
+    #[cfg(test)]
+    pub fn from_root_for_test(root: TiValue) -> Self {
+        let mut save = Self {
+            source_path: None,
+            format: SaveFormat::Json5,
+            line_ending: LineEnding::Lf,
+            original_bytes: Vec::new(),
+            root,
+            dirty: false,
+            index: SaveIndex::empty(),
+        };
+        save.rebuild_index();
+        save
+    }
+
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
     }
