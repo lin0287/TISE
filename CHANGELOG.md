@@ -1,3 +1,10 @@
+# 2.1.0
+- New faction/group filters! Thanks @lin0287 for the contribution -- issue #13
+- Save comparison: structural diff between two saves with a noise-reduction ignore preset and a Compare Saves window -- issue #12
+- List editor enhancements: add/remove/duplicate rows with per-row type selection -- issue #11
+- CLI flags: `--version` and `--help` now exit without launching the GUI
+- CI: headless GUI smoke test under xvfb, and fixed the Linux release artifact filename -- issue #17
+
 # 2.0.0
 - Complete rewrite in Rust!
   - Indirectly fixes issue #8 since we no longer use Poetry and Python
