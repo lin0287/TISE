@@ -12,7 +12,34 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify-version:
+    name: Verify tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare tag against Cargo.toml version
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Tag looks like "refs/tags/v2.1.1"; strip the prefix and leading "v".
+          tag="${GITHUB_REF#refs/tags/}"
+          tag_version="${tag#v}"
+
+          # Pull the [package] version out of Cargo.toml (first `version = "..."`).
+          cargo_version=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+
+          echo "Tag version:        ${tag_version}"
+          echo "Cargo.toml version: ${cargo_version}"
+
+          if [[ "${tag_version}" != "${cargo_version}" ]]; then
+            echo "::error::Release tag v${tag_version} does not match Cargo.toml version ${cargo_version}. Bump Cargo.toml (and Cargo.lock) before tagging."
+            exit 1
+          fi
+          echo "OK: tag and Cargo.toml agree on ${cargo_version}"
+
   build:
+    needs: [verify-version]
     uses: ./.github/workflows/build.yml
 
   publish:
