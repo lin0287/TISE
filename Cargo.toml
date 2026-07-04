@@ -33,6 +33,10 @@ ryu = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 # Structured error types (used where errors are part of the API surface).
 thiserror = "2.0"
+# Blocking HTTP client (rustls TLS, no system OpenSSL) for the GitHub update check.
+ureq = { version = "3", features = ["json"] }
+# JSON parsing for the GitHub releases API response.
+serde_json = "1.0"
 
 [dev-dependencies]
 # Nicer diffs for byte-for-byte roundtrip assertion failures.

@@ -30,6 +30,7 @@ pub fn run_gui() -> eframe::Result {
         Box::new(|_cc| {
             Ok(Box::new(TiseApp {
                 theme_dark: true,
+                update_check: Some(crate::update::UpdateCheck::spawn()),
                 ..Default::default()
             }))
         }),
@@ -137,6 +138,13 @@ struct TiseApp {
     diff_visible_groups: BTreeSet<String>,
     /// Case-insensitive search/filter text for object metadata and fields.
     diff_search: String,
+
+    /// Startup GitHub update check. Polled each frame; renders a dismissible
+    /// banner when a newer release exists. `None` until `run_gui` seeds it.
+    update_check: Option<crate::update::UpdateCheck>,
+    /// Set once the user dismisses the update banner, so it stays hidden for
+    /// the rest of the session.
+    update_dismissed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -3279,6 +3287,39 @@ fn array_of_key_value_refs(val: &TiValue) -> Option<Vec<(i64, String)>> {
     Some(out)
 }
 
+impl TiseApp {
+    /// Render the "update available" banner directly under the menu bar, if the
+    /// background check found a newer release and the user hasn't dismissed it.
+    /// No-op while the check is pending, failed, or reported up-to-date.
+    fn show_update_banner(&mut self, ctx: &egui::Context) {
+        if self.update_dismissed {
+            return;
+        }
+        // Poll the check; bail unless a newer version is known. Clone the tag so
+        // we don't hold an immutable borrow of self across the mutable UI calls.
+        let latest_tag = match self.update_check.as_mut().and_then(|c| c.poll()) {
+            Some(update) => update.latest_tag.clone(),
+            None => return,
+        };
+
+        let mut dismiss = false;
+        egui::TopBottomPanel::top("update_banner").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} {}", statics::EN_UPDATE_PREFIX, latest_tag));
+                ui.hyperlink_to(statics::EN_UPDATE_DOWNLOAD, crate::update::RELEASES_PAGE);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button(statics::EN_UPDATE_DISMISS).clicked() {
+                        dismiss = true;
+                    }
+                });
+            });
+        });
+        if dismiss {
+            self.update_dismissed = true;
+        }
+    }
+}
+
 impl eframe::App for TiseApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Undo/Redo shortcuts.
@@ -3432,6 +3473,8 @@ impl eframe::App for TiseApp {
                 }
             });
         });
+
+        self.show_update_banner(ctx);
 
         if self.changes_open {
             let mut open = self.changes_open;

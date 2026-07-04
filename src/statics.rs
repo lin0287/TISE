@@ -35,6 +35,11 @@ pub const EN_ABOUT_SHORTCUT_ALT: &str = "- Alt+Left / Alt+Right: Back/Forward";
 pub const EN_ABOUT_SHORTCUT_MOUSE: &str = "- Mouse back/forward buttons also work";
 pub const EN_PROJECT_REPO: &str = "GitHub Repo";
 
+// Update-available banner (shown when a newer GitHub release exists).
+pub const EN_UPDATE_PREFIX: &str = "Update available:";
+pub const EN_UPDATE_DOWNLOAD: &str = "Download";
+pub const EN_UPDATE_DISMISS: &str = "x";
+
 pub const EN_HOME_HEADING: &str = "TISE: Terra Invicta Save Editor";
 pub const EN_HOME_INSTRUCTIONS: &str = "Open a Terra Invicta save (.json/.gz) to begin.";
 
