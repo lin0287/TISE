@@ -2147,8 +2147,7 @@ impl TiseApp {
             );
             let after = TiValue::Object(ref_map);
 
-            let Some(obj) =
-                save.get_object_value_mut(statics::TI_GROUP_ORG_STATE, object_id)
+            let Some(obj) = save.get_object_value_mut(statics::TI_GROUP_ORG_STATE, object_id)
             else {
                 continue;
             };
@@ -2284,11 +2283,7 @@ impl TiseApp {
             "{} {}: {}",
             statics::EN_SORT_ID,
             faction_id,
-            Self::describe_change(
-                statics::TI_PROP_AVAILABLE_ORGS,
-                Some(&before),
-                Some(&after)
-            )
+            Self::describe_change(statics::TI_PROP_AVAILABLE_ORGS, Some(&before), Some(&after))
         );
         self.record_action(EditAction {
             group: statics::TI_GROUP_FACTION_STATE.to_string(),
@@ -4404,8 +4399,7 @@ impl eframe::App for TiseApp {
                         statics::EN_LABEL_ORGS_SELECTED
                     ));
 
-                    let can_add =
-                        selected_count > 0 && self.org_add_faction_target.is_some();
+                    let can_add = selected_count > 0 && self.org_add_faction_target.is_some();
                     if ui
                         .add_enabled(can_add, egui::Button::new(statics::EN_BTN_ADD_TO_FACTION))
                         .clicked()
