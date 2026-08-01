@@ -6,6 +6,7 @@ pub mod diff;
 mod gui;
 mod save;
 pub mod statics;
+mod update;
 mod value;
 
 pub use diff::{
