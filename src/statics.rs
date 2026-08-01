@@ -237,6 +237,9 @@ pub const TI_PROP_FACTION_ORBIT: &str = "factionOrbit";
 // Org properties.
 pub const TI_PROP_TIER: &str = "tier";
 
+// Faction property listing orgs currently available/owned by the faction.
+pub const TI_PROP_AVAILABLE_ORGS: &str = "availableOrgs";
+
 // Hab module property for construction state.
 pub const TI_PROP_CONSTRUCTION_COMPLETED: &str = "constructionCompleted";
 
@@ -254,3 +257,9 @@ pub const EN_LABEL_FILTER_CONSTRUCTION: &str = "Construction:";
 pub const EN_FILTER_CONSTRUCTION_ALL: &str = "All";
 pub const EN_FILTER_CONSTRUCTION_COMPLETED: &str = "Completed";
 pub const EN_FILTER_CONSTRUCTION_IN_PROGRESS: &str = "In Progress";
+
+// Bulk "add selected orgs to faction" UI strings.
+pub const EN_LABEL_ADD_TO_FACTION: &str = "Add to Faction:";
+pub const EN_FILTER_SELECT_FACTION: &str = "Select Faction...";
+pub const EN_BTN_ADD_TO_FACTION: &str = "Add Selected to Faction";
+pub const EN_LABEL_ORGS_SELECTED: &str = "selected";

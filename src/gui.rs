@@ -120,6 +120,10 @@ struct TiseApp {
     // Feature: filter TICouncilorState objects by faction.
     councilor_faction_filter: Option<i64>,
 
+    // Feature: bulk-add checked TIOrgState objects to a chosen faction.
+    org_bulk_selected_ids: BTreeSet<i64>,
+    org_add_faction_target: Option<i64>,
+
     // Feature: Compare Saves (structural diff against another save file).
     diff_open: bool,
     /// Full, unfiltered diff cached from the last Compare. The window re-derives
@@ -2125,6 +2129,178 @@ impl TiseApp {
         {
             self.refresh_public_opinion_editor(obj, &prop);
         }
+    }
+
+    /// Sets `factionOrbit` on every checked TIOrgState object to reference `faction_id`,
+    /// and keeps `TIFactionState.availableOrgs` in sync (added to the new faction, removed
+    /// from any previous faction). Records one undoable EditAction per changed property.
+    fn add_selected_orgs_to_faction(&mut self, save: &mut LoadedSave, faction_id: i64) {
+        let org_ids: Vec<i64> = self.org_bulk_selected_ids.iter().copied().collect();
+        if org_ids.is_empty() {
+            return;
+        }
+
+        let mut updated = 0usize;
+        for object_id in org_ids {
+            let before = save
+                .get_object_value(statics::TI_GROUP_ORG_STATE, object_id)
+                .and_then(|o| o.get(statics::TI_PROP_FACTION_ORBIT))
+                .cloned();
+            let previous_faction_id = before.as_ref().and_then(TiValue::is_relational_ref);
+
+            let mut ref_map = indexmap::IndexMap::new();
+            ref_map.insert(
+                statics::TI_REF_FIELD_VALUE.to_string(),
+                TiValue::Number(crate::value::TiNumber::I64(faction_id)),
+            );
+            let after = TiValue::Object(ref_map);
+
+            let Some(obj) = save.get_object_value_mut(statics::TI_GROUP_ORG_STATE, object_id)
+            else {
+                continue;
+            };
+            obj.insert(statics::TI_PROP_FACTION_ORBIT.to_string(), after.clone());
+            updated += 1;
+
+            let desc = format!(
+                "{} {}: {}",
+                statics::EN_SORT_ID,
+                object_id,
+                Self::describe_change(
+                    statics::TI_PROP_FACTION_ORBIT,
+                    before.as_ref(),
+                    Some(&after)
+                )
+            );
+            self.record_action(EditAction {
+                group: statics::TI_GROUP_ORG_STATE.to_string(),
+                object_id,
+                prop: statics::TI_PROP_FACTION_ORBIT.to_string(),
+                before,
+                after: Some(after),
+                description: desc,
+            });
+
+            if let Some(prev_faction_id) = previous_faction_id
+                && prev_faction_id != faction_id
+            {
+                self.remove_org_from_faction_available_orgs(save, prev_faction_id, object_id);
+            }
+            self.add_org_to_faction_available_orgs(save, faction_id, object_id);
+        }
+
+        save.rebuild_index();
+        save.refresh_dirty();
+
+        self.status = format!("Added {updated} organization(s) to faction {faction_id}");
+        self.last_error = None;
+    }
+
+    /// Appends `org_id` as a relational ref to `TIFactionState.availableOrgs` for `faction_id`,
+    /// unless it's already present. Records an undoable EditAction.
+    fn add_org_to_faction_available_orgs(
+        &mut self,
+        save: &mut LoadedSave,
+        faction_id: i64,
+        org_id: i64,
+    ) {
+        let Some(faction_obj) = save.get_object_value(statics::TI_GROUP_FACTION_STATE, faction_id)
+        else {
+            return;
+        };
+        let before = faction_obj.get(statics::TI_PROP_AVAILABLE_ORGS).cloned();
+        let mut items: Vec<TiValue> = match &before {
+            Some(TiValue::Array(items)) => items.clone(),
+            _ => Vec::new(),
+        };
+        if items.iter().any(|v| v.is_relational_ref() == Some(org_id)) {
+            return;
+        }
+
+        let mut ref_map = indexmap::IndexMap::new();
+        ref_map.insert(
+            statics::TI_REF_FIELD_VALUE.to_string(),
+            TiValue::Number(crate::value::TiNumber::I64(org_id)),
+        );
+        items.push(TiValue::Object(ref_map));
+        let after = TiValue::Array(items);
+
+        let Some(obj) = save.get_object_value_mut(statics::TI_GROUP_FACTION_STATE, faction_id)
+        else {
+            return;
+        };
+        obj.insert(statics::TI_PROP_AVAILABLE_ORGS.to_string(), after.clone());
+
+        let desc = format!(
+            "{} {}: {}",
+            statics::EN_SORT_ID,
+            faction_id,
+            Self::describe_change(
+                statics::TI_PROP_AVAILABLE_ORGS,
+                before.as_ref(),
+                Some(&after)
+            )
+        );
+        self.record_action(EditAction {
+            group: statics::TI_GROUP_FACTION_STATE.to_string(),
+            object_id: faction_id,
+            prop: statics::TI_PROP_AVAILABLE_ORGS.to_string(),
+            before,
+            after: Some(after),
+            description: desc,
+        });
+    }
+
+    /// Removes `org_id`'s relational ref from `TIFactionState.availableOrgs` for `faction_id`,
+    /// if present. Records an undoable EditAction.
+    fn remove_org_from_faction_available_orgs(
+        &mut self,
+        save: &mut LoadedSave,
+        faction_id: i64,
+        org_id: i64,
+    ) {
+        let Some(faction_obj) = save.get_object_value(statics::TI_GROUP_FACTION_STATE, faction_id)
+        else {
+            return;
+        };
+        let Some(before) = faction_obj.get(statics::TI_PROP_AVAILABLE_ORGS).cloned() else {
+            return;
+        };
+        let Some(items) = before.as_array() else {
+            return;
+        };
+        if !items.iter().any(|v| v.is_relational_ref() == Some(org_id)) {
+            return;
+        }
+
+        let after = TiValue::Array(
+            items
+                .iter()
+                .filter(|v| v.is_relational_ref() != Some(org_id))
+                .cloned()
+                .collect(),
+        );
+
+        let Some(obj) = save.get_object_value_mut(statics::TI_GROUP_FACTION_STATE, faction_id)
+        else {
+            return;
+        };
+        obj.insert(statics::TI_PROP_AVAILABLE_ORGS.to_string(), after.clone());
+
+        let desc = format!(
+            "{} {}: {}",
+            statics::EN_SORT_ID,
+            faction_id,
+            Self::describe_change(statics::TI_PROP_AVAILABLE_ORGS, Some(&before), Some(&after))
+        );
+        self.record_action(EditAction {
+            group: statics::TI_GROUP_FACTION_STATE.to_string(),
+            object_id: faction_id,
+            prop: statics::TI_PROP_AVAILABLE_ORGS.to_string(),
+            before: Some(before),
+            after: Some(after),
+            description: desc,
+        });
     }
 
     fn refresh_public_opinion_editor(
@@ -4157,11 +4333,16 @@ impl eframe::App for TiseApp {
                                     self.scroll_groups_to_selected = false;
                                     self.scroll_objects_to_selected = false;
                                     self.scroll_properties_to_selected = false;
+                                    if group != statics::TI_GROUP_ORG_STATE {
+                                        self.org_bulk_selected_ids.clear();
+                                    }
                                 }
                             }
                         });
                 });
             });
+
+        let mut org_add_faction_request: Option<i64> = None;
 
         egui::SidePanel::left("objects_panel")
             .resizable(true)
@@ -4233,6 +4414,42 @@ impl eframe::App for TiseApp {
                         &[1, 2, 3, 4, 5],
                         "org_tier_filter",
                     );
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label(statics::EN_LABEL_ADD_TO_FACTION);
+                        let selected_label = self
+                            .org_add_faction_target
+                            .and_then(|id| id_to_display_name.get(&id))
+                            .cloned()
+                            .unwrap_or_else(|| statics::EN_FILTER_SELECT_FACTION.to_string());
+                        egui::ComboBox::from_id_salt("org_add_faction_target")
+                            .selected_text(selected_label)
+                            .show_ui(ui, |ui| {
+                                for faction in &factions {
+                                    ui.selectable_value(
+                                        &mut self.org_add_faction_target,
+                                        Some(faction.id),
+                                        &faction.display_name,
+                                    );
+                                }
+                            });
+                    });
+
+                    let selected_count = self.org_bulk_selected_ids.len();
+                    ui.label(format!(
+                        "{selected_count} {}",
+                        statics::EN_LABEL_ORGS_SELECTED
+                    ));
+
+                    let can_add = selected_count > 0 && self.org_add_faction_target.is_some();
+                    if ui
+                        .add_enabled(can_add, egui::Button::new(statics::EN_BTN_ADD_TO_FACTION))
+                        .clicked()
+                        && let Some(faction_id) = self.org_add_faction_target
+                    {
+                        org_add_faction_request = Some(faction_id);
+                    }
                     ui.separator();
                 }
 
@@ -4350,8 +4567,30 @@ impl eframe::App for TiseApp {
                             for obj in objects {
                                 let selected = self.selected_object_id == Some(obj.id);
                                 let text = format!("{}: {}", obj.id, obj.display_name);
-                                let resp =
-                                    Self::selectable_row_left(ui, selected, text.as_str(), row_h);
+                                let is_org_group = group == statics::TI_GROUP_ORG_STATE;
+
+                                let resp = if is_org_group {
+                                    let mut checked = self.org_bulk_selected_ids.contains(&obj.id);
+                                    ui.horizontal(|ui| {
+                                        if ui.checkbox(&mut checked, "").changed() {
+                                            if checked {
+                                                self.org_bulk_selected_ids.insert(obj.id);
+                                            } else {
+                                                self.org_bulk_selected_ids.remove(&obj.id);
+                                            }
+                                        }
+                                        Self::selectable_row_left(
+                                            ui,
+                                            selected,
+                                            text.as_str(),
+                                            row_h,
+                                        )
+                                    })
+                                    .inner
+                                } else {
+                                    Self::selectable_row_left(ui, selected, text.as_str(), row_h)
+                                };
+
                                 if selected && self.scroll_objects_to_selected {
                                     let align = if self.scroll_align_center {
                                         egui::Align::Center
@@ -4369,6 +4608,10 @@ impl eframe::App for TiseApp {
                         });
                 });
             });
+
+        if let Some(faction_id) = org_add_faction_request {
+            self.add_selected_orgs_to_faction(&mut save, faction_id);
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let Some(group) = self.selected_group.clone() else {
