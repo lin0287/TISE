@@ -1,3 +1,7 @@
+# 2.2.0
+- In the Organizations group, new "Add to Faction" feature! Thanks @lin0287 for the contribution -- pull #24
+- In-app update checker confirmed working!
+
 # 2.1.3
 - Testing "release" for in-app update checker -- pull #23
 
