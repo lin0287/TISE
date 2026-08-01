@@ -314,7 +314,7 @@ impl TiseApp {
             painter.add(egui::Shape::convex_polygon(
                 points,
                 color,
-                egui::Stroke::new(1.0, ui.visuals().window_stroke().color),
+                egui::Stroke::new(1.0_f32, ui.visuals().window_stroke().color),
             ));
 
             // Optional label for larger slices.

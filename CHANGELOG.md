@@ -1,3 +1,12 @@
+# 2.1.3
+- Testing "release" for in-app update checker -- pull #23
+
+# 2.1.2
+- Unreleased, CI smoke test for Cargo-git-tag version checker
+
+# 2.1.1
+- Add No Faction Filter for Organizations -- pull #21
+
 # 2.1.0
 - New faction/group filters! Thanks @lin0287 for the contribution -- issue #13
 - Save comparison: structural diff between two saves with a noise-reduction ignore preset and a Compare Saves window -- issue #12
